@@ -59,7 +59,9 @@ async function callGeminiAPI(systemInstruction, userPrompt, useSearch = true) {
   let apiKey = "";
   try { apiKey = localStorage.getItem("gemini_api_key") || ""; } catch (e) {}
   if (!apiKey) throw new Error("Chiave API Gemini mancante: inseriscila con l'icona della chiave in alto.");
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+  let model = "gemini-3-flash-preview";
+  try { model = localStorage.getItem("gemini_model") || model; } catch (e) {}
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   
   const payload = {
     contents: [{ role: "user", parts: [{ text: userPrompt }] }],
@@ -191,6 +193,26 @@ export default function AnalizzatoreAzionario() {
   const [err, setErr] = useState(null);
   const [hist, setHist] = useState([]);
   const [showKey, setShowKey] = useState(false);
+  const [modelVal, setModelVal] = useState(() => { try { return localStorage.getItem("gemini_model") || "gemini-3-flash-preview"; } catch (e) { return "gemini-3-flash-preview"; } });
+  const [testMsg, setTestMsg] = useState("");
+  const [models, setModels] = useState([]);
+  const [testing, setTesting] = useState(false);
+  const testKey = async () => {
+    setTesting(true); setTestMsg("Test in corso…"); setModels([]);
+    try {
+      const k = keyVal.trim();
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${k}`);
+      const t = await r.text();
+      if (!r.ok) { setTestMsg(`Chiave NON valida o non abilitata (HTTP ${r.status}): ${t.slice(0, 300)}`); setTesting(false); return; }
+      const list = (JSON.parse(t).models || [])
+        .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+        .map((m) => m.name.replace("models/", ""))
+        .filter((n) => /gemini/.test(n) && !/(embedding|tts|image|live|audio|robotics|computer|thinking-exp)/.test(n));
+      setModels(list);
+      setTestMsg(`Chiave valida. ${list.length} modelli disponibili: tocca quello da usare (consigliato un "flash").`);
+    } catch (e) { setTestMsg("Errore di rete: " + e.message); }
+    setTesting(false);
+  };
   const [keyVal, setKeyVal] = useState(() => { try { return localStorage.getItem("gemini_api_key") || ""; } catch (e) { return ""; } });
   const busy = step >= 0 && step < STEPS.length;
   const th = dark ? { bg: "bg-slate-950 text-slate-100", card: "bg-slate-900 border-slate-800", mute: "text-slate-400", inp: "bg-slate-900 border-slate-700 text-slate-100", grid: "#334155", txt: "#94a3b8", dropdown: "bg-slate-900 border-slate-700 hover:bg-slate-800" } : { bg: "bg-slate-50 text-slate-900", card: "bg-white border-slate-200", mute: "text-slate-500", inp: "bg-white border-slate-300 text-slate-900", grid: "#e2e8f0", txt: "#64748b", dropdown: "bg-white border-slate-200 hover:bg-slate-100" };
@@ -302,10 +324,21 @@ export default function AnalizzatoreAzionario() {
           <div className={`rounded-xl border p-3 text-sm space-y-2 ${th.card}`}>
             <div className="font-medium">Chiave API Gemini</div>
             <div className={`text-xs ${th.mute}`}>Salvata solo su questo dispositivo. Creala gratis su aistudio.google.com/apikey</div>
+            <input type="password" value={keyVal} onChange={(e) => setKeyVal(e.target.value)} placeholder="AIza…" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
+            <div className="font-medium pt-1">Modello</div>
+            <input type="text" value={modelVal} onChange={(e) => setModelVal(e.target.value)} className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="flex gap-2">
-              <input type="password" value={keyVal} onChange={(e) => setKeyVal(e.target.value)} placeholder="AIza…" className={`flex-1 min-w-0 px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
-              <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); } catch (e) {} setShowKey(false); setErr(null); }} className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium">Salva</button>
+              <button disabled={testing} onClick={testKey} className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>Testa chiave</button>
+              <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); localStorage.setItem("gemini_model", modelVal.trim() || "gemini-3-flash-preview"); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium">Salva</button>
             </div>
+            {testMsg && <div className={`text-xs break-words ${th.mute}`}>{testMsg}</div>}
+            {models.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {models.map((m) => (
+                  <button key={m} onClick={() => setModelVal(m)} className={`px-2 py-1 rounded-full border text-xs ${m === modelVal ? "bg-emerald-600 text-white border-emerald-600" : th.card}`}>{m}</button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
