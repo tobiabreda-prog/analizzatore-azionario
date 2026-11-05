@@ -2,24 +2,62 @@ name: Build APK
 on:
   push:
   workflow_dispatch:
+
 jobs:
   apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Trova la cartella del progetto
+        run: |
+          echo "Contenuto del repository:"
+          find . -maxdepth 3 -not -path "./.git/*" -not -path "*/node_modules/*" | sort
+          PKG=$(find . -name package.json -not -path "*/node_modules/*" | head -n 1)
+          if [ -z "$PKG" ]; then
+            echo "::error::package.json non trovato nel repository: i file non sono stati caricati correttamente."
+            exit 1
+          fi
+          APP_DIR=$(dirname "$PKG")
+          echo "Cartella progetto: $APP_DIR"
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+          for f in index.html vite.config.js tailwind.config.js postcss.config.js capacitor.config.json src/main.jsx src/App.jsx src/index.css; do
+            [ -f "$APP_DIR/$f" ] || { echo "::error::File mancante: $f"; exit 1; }
+          done
+
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with:
+          node-version: 20
+
       - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: 17 }
+        with:
+          distribution: temurin
+          java-version: 17
+
       - uses: android-actions/setup-android@v3
-      - run: npm install
-      - run: npm run build
-      - run: npx cap add android
-      - run: npx cap sync android
+
+      - name: Installa dipendenze
+        working-directory: ${{ env.APP_DIR }}
+        run: npm install --no-audit --no-fund
+
+      - name: Build web
+        working-directory: ${{ env.APP_DIR }}
+        run: npm run build
+
+      - name: Aggiungi piattaforma Android
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          npx cap add android
+          npx cap sync android
+
       - name: Compila APK
-        working-directory: android
-        run: ./gradlew assembleDebug
+        working-directory: ${{ env.APP_DIR }}/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
       - uses: actions/upload-artifact@v4
         with:
           name: analizzatore-azionario-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.APP_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
