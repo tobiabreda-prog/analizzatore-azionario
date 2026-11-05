@@ -74,6 +74,7 @@ async function callGeminiAPI(systemInstruction, userPrompt, useSearch = true) {
   }
 
   let delay = 1000;
+  let rateRetried = false;
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
       const response = await fetch(apiUrl, {
@@ -83,7 +84,19 @@ async function callGeminiAPI(systemInstruction, userPrompt, useSearch = true) {
       });
 
       if (response.status === 429) {
-        throw new Error("API 429: Rate limit raggiunto.");
+        const body = await response.text();
+        let msg = body;
+        try { msg = JSON.parse(body).error?.message || body; } catch (e) {}
+        const m = body.match(/"retryDelay":\s*"(\d+(?:\.\d+)?)s"/) || msg.match(/retry in (\d+(?:\.\d+)?)s/i);
+        const wait = m ? Math.ceil(parseFloat(m[1])) : null;
+        if (!rateRetried && wait != null && wait <= 65) {
+          rateRetried = true;
+          await new Promise((res) => setTimeout(res, (wait + 1) * 1000));
+          continue;
+        }
+        const e = new Error("Limite di richieste Google (429)" + (wait != null ? ` — riprova tra circa ${wait}s` : "") + ". Dettaglio: " + msg.slice(0, 400));
+        e.noRetry = true;
+        throw e;
       }
       if (!response.ok) {
         throw new Error(`Errore HTTP ${response.status}: ${await response.text()}`);
@@ -103,7 +116,7 @@ async function callGeminiAPI(systemInstruction, userPrompt, useSearch = true) {
       }
       return parsed;
     } catch (err) {
-      if (attempt === 3 || /mancante|HTTP 40[0-3]/.test(err.message)) throw err;
+      if (err.noRetry || attempt === 3 || /mancante|HTTP 40[0-3]/.test(err.message)) throw err;
       await new Promise((res) => setTimeout(res, delay));
       delay *= 2;
     }
