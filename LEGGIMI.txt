@@ -1,0 +1,12 @@
+COME OTTENERE L'APK (senza installare nulla sul PC)
+1. Crea un account gratuito su github.com e un nuovo repository PRIVATO.
+2. Carica tutto il contenuto di questa cartella (compresa la cartella .github) nel repository
+   (Add file > Upload files, trascina i file, Commit).
+3. Vai nella scheda "Actions": parte da solo il workflow "Build APK" (circa 5-8 minuti).
+   Se non parte: Actions > Build APK > Run workflow.
+4. A fine build apri l'esecuzione e scarica l'artefatto "analizzatore-azionario-apk": dentro c'e' app-debug.apk.
+5. Copia l'APK sul telefono e installalo (consenti "installa da origini sconosciute").
+6. Nell'app tocca l'icona della chiave e inserisci la tua chiave API Gemini (gratis su aistudio.google.com/apikey).
+
+In alternativa, con Android Studio + JDK 17:  npm install && npm run build && npx cap add android && npx cap sync android
+poi Build > Build APK(s) in Android Studio.
