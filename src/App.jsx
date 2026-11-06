@@ -185,7 +185,7 @@ function computeScores(D, tech) {
   return { scores, overall, rel: Math.max(0, Math.round(rel)), derived: { cagr, epsG, nm, om, nde, up } };
 }
 const labelOf = (s) => (s == null ? "n.d." : s >= 75 ? "COMPRARE" : s >= 62 ? "ACCUMULARE" : s >= 45 ? "MANTENERE" : s >= 32 ? "EVITARE" : "VENDERE");
-const LABEL_COLOR = { COMPRARE: "bg-emerald-600", ACCUMULARE: "bg-green-500", MANTENERE: "bg-amber-500", EVITARE: "bg-orange-600", VENDERE: "bg-red-600", "n.d.": "bg-slate-500" };
+const LABEL_COLOR = { COMPRARE: "bg-emerald-700", ACCUMULARE: "bg-lime-700", MANTENERE: "bg-amber-400 !text-slate-900", EVITARE: "bg-orange-700", VENDERE: "bg-red-700", "n.d.": "bg-slate-600" };
 
 function SafeChart({ height = 190, children }) {
   const [hasError, setHasError] = useState(false);
@@ -234,8 +234,12 @@ export default function AnalizzatoreAzionario() {
   };
   const [keyVal, setKeyVal] = useState(() => { try { return localStorage.getItem("gemini_api_key") || ""; } catch (e) { return ""; } });
   const busy = step >= 0 && step < STEPS.length;
-  const th = dark ? { bg: "bg-slate-950 text-slate-100", card: "bg-slate-900 border-slate-800", mute: "text-slate-400", inp: "bg-slate-900 border-slate-700 text-slate-100", grid: "#334155", txt: "#94a3b8", dropdown: "bg-slate-900 border-slate-700 hover:bg-slate-800" } : { bg: "bg-slate-50 text-slate-900", card: "bg-white border-slate-200", mute: "text-slate-500", inp: "bg-white border-slate-300 text-slate-900", grid: "#e2e8f0", txt: "#64748b", dropdown: "bg-white border-slate-200 hover:bg-slate-100" };
-  const ax = { stroke: th.txt, fontSize: 10, tickLine: false };
+  const th = dark ? { bg: "bg-slate-950 text-slate-100", card: "bg-slate-900 border-slate-800", mute: "text-slate-400", inp: "bg-slate-900 border-slate-700 text-slate-100", grid: "#3f4d63", txt: "#cbd5e1", dropdown: "bg-slate-900 border-slate-700 hover:bg-slate-800" } : { bg: "bg-slate-50 text-slate-900", card: "bg-white border-slate-200", mute: "text-slate-500", inp: "bg-white border-slate-300 text-slate-900", grid: "#d5dde8", txt: "#475569", dropdown: "bg-white border-slate-200 hover:bg-slate-100" };
+  const C = dark
+    ? { blue: "#60a5fa", amber: "#fbbf24", red: "#f87171", green: "#34d399", purple: "#a78bfa", teal: "#2dd4bf", gray: "#94a3b8" }
+    : { blue: "#2563eb", amber: "#b45309", red: "#dc2626", green: "#047857", purple: "#6d28d9", teal: "#0f766e", gray: "#64748b" };
+  const ax = { tick: { fill: th.txt, fontSize: 10 }, axisLine: { stroke: th.grid }, tickLine: false };
+  const legendFmt = (v) => <span style={{ color: dark ? "#e2e8f0" : "#1e293b" }}>{v}</span>;
 
   const filteredSuggestions = useMemo(() => {
     if (!input.trim()) return [];
@@ -343,7 +347,12 @@ export default function AnalizzatoreAzionario() {
   };
   const Stat = ({ k, v, c }) => (<div className={`rounded-lg border p-2 ${th.card}`}><div className={`text-xs ${th.mute}`}>{k}</div><div className={`font-semibold ${c || ""}`}>{v}</div></div>);
   const chartH = 190;
-  const tip = { contentStyle: { background: dark ? "#0f172a" : "#fff", border: "1px solid " + th.grid, fontSize: 12 } };
+  const tip = {
+    contentStyle: { background: dark ? "#0f172a" : "#ffffff", border: "1px solid " + (dark ? "#475569" : "#cbd5e1"), borderRadius: 8, fontSize: 12, color: dark ? "#f1f5f9" : "#0f172a" },
+    labelStyle: { color: dark ? "#f1f5f9" : "#0f172a", fontWeight: 600 },
+    itemStyle: { color: dark ? "#e2e8f0" : "#1e293b" },
+    cursor: { fill: dark ? "rgba(148,163,184,0.18)" : "rgba(100,116,139,0.12)", stroke: dark ? C.gray : C.gray },
+  };
 
   const annual = (f?.annual || []).slice().sort((x, y) => x.y - y.y).map((r, i, arr) => ({ ...r, gm: r.rev ? (r.gp / r.rev) * 100 : null, om: r.rev ? (r.op / r.rev) * 100 : null, nm: r.rev ? (r.ni / r.rev) * 100 : null, g: i && arr[i - 1].rev ? (r.rev / arr[i - 1].rev - 1) * 100 : null }));
   const bal = f?.balance || {};
@@ -372,7 +381,7 @@ export default function AnalizzatoreAzionario() {
   const cfColor = (n) => (n == null || isNaN(n) ? "" : n > 0 ? "text-emerald-500" : n < 0 ? "text-red-500" : "");
 
   return (
-    <div className={`min-h-screen ${th.bg}`}>
+    <div className={`min-h-screen ${th.bg} ${dark ? "theme-dark" : "theme-light"}`}>
       <div className="max-w-5xl mx-auto p-3 sm:p-5 space-y-4">
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2"><TrendingUp className="text-emerald-500" />Analizzatore Azionario Gemini</h1>
@@ -499,16 +508,16 @@ export default function AnalizzatoreAzionario() {
           <Card title="Analisi tecnica" meta={<Meta d={q.asOf} src={q.source} />}>
             <p className={`text-xs mb-2 ${th.mute}`}>Indicatori calcolati su chiusure settimanali: SMA 50 ≈ 10 sett., SMA 200 ≈ 40 sett.; RSI(14) e MACD(12,26,9) su base settimanale.</p>
             <SafeChart height={230}>
-              <ResponsiveContainer><ComposedChart data={tech}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="d" {...ax} minTickGap={40} /><YAxis {...ax} domain={["auto", "auto"]} width={42} /><Tooltip {...tip} formatter={(x) => nf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} />
-                <Line dataKey="c" name="Prezzo" stroke="#3b82f6" dot={false} strokeWidth={2} /><Line dataKey="s50" name="SMA 50" stroke="#f59e0b" dot={false} /><Line dataKey="s200" name="SMA 200" stroke="#ef4444" dot={false} />
-                {(q.support || []).filter(num).slice(0, 2).map((x, i) => <ReferenceLine key={"s" + i} y={x} stroke="#10b981" strokeDasharray="4 4" />)}
-                {(q.resistance || []).filter(num).slice(0, 2).map((x, i) => <ReferenceLine key={"r" + i} y={x} stroke="#ef4444" strokeDasharray="4 4" />)}
+              <ResponsiveContainer><ComposedChart data={tech}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="d" {...ax} minTickGap={40} /><YAxis {...ax} domain={["auto", "auto"]} width={42} /><Tooltip {...tip} formatter={(x) => nf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFmt} />
+                <Line dataKey="c" name="Prezzo" stroke={C.blue} dot={false} strokeWidth={2} /><Line dataKey="s50" name="SMA 50" stroke={C.amber} dot={false} /><Line dataKey="s200" name="SMA 200" stroke={C.red} dot={false} />
+                {(q.support || []).filter(num).slice(0, 2).map((x, i) => <ReferenceLine key={"s" + i} y={x} stroke={C.green} strokeDasharray="4 4" />)}
+                {(q.resistance || []).filter(num).slice(0, 2).map((x, i) => <ReferenceLine key={"r" + i} y={x} stroke={C.red} strokeDasharray="4 4" />)}
               </ComposedChart></ResponsiveContainer>
             </SafeChart>
             <div className="grid sm:grid-cols-3 gap-3 mt-2">
-              <SafeChart height={120}><ResponsiveContainer><BarChart data={tech}><XAxis dataKey="d" hide /><YAxis {...ax} width={32} /><Tooltip {...tip} formatter={(x) => nf(x)} /><Bar dataKey="v" name="Volumi (mln)" fill="#64748b" /></BarChart></ResponsiveContainer></SafeChart>
-              <SafeChart height={120}><ResponsiveContainer><LineChart data={tech}><XAxis dataKey="d" hide /><YAxis {...ax} domain={[0, 100]} width={28} /><Tooltip {...tip} formatter={(x) => nf(x, 1)} /><ReferenceLine y={70} stroke="#ef4444" strokeDasharray="3 3" /><ReferenceLine y={30} stroke="#10b981" strokeDasharray="3 3" /><Line dataKey="rsi" name="RSI(14)" stroke="#8b5cf6" dot={false} /></LineChart></ResponsiveContainer></SafeChart>
-              <SafeChart height={120}><ResponsiveContainer><ComposedChart data={tech}><XAxis dataKey="d" hide /><YAxis {...ax} width={32} /><Tooltip {...tip} formatter={(x) => nf(x, 3)} /><Bar dataKey="hist" name="Istogramma">{tech.map((r, i) => <Cell key={i} fill={r.hist >= 0 ? "#10b981" : "#ef4444"} />)}</Bar><Line dataKey="macd" name="MACD" stroke="#3b82f6" dot={false} /><Line dataKey="sig" name="Signal" stroke="#f59e0b" dot={false} /></ComposedChart></ResponsiveContainer></SafeChart>
+              <SafeChart height={120}><ResponsiveContainer><BarChart data={tech}><XAxis dataKey="d" hide /><YAxis {...ax} width={32} /><Tooltip {...tip} formatter={(x) => nf(x)} /><Bar dataKey="v" name="Volumi (mln)" fill={C.gray} /></BarChart></ResponsiveContainer></SafeChart>
+              <SafeChart height={120}><ResponsiveContainer><LineChart data={tech}><XAxis dataKey="d" hide /><YAxis {...ax} domain={[0, 100]} width={28} /><Tooltip {...tip} formatter={(x) => nf(x, 1)} /><ReferenceLine y={70} stroke={C.red} strokeDasharray="3 3" /><ReferenceLine y={30} stroke={C.green} strokeDasharray="3 3" /><Line dataKey="rsi" name="RSI(14)" stroke={C.purple} dot={false} /></LineChart></ResponsiveContainer></SafeChart>
+              <SafeChart height={120}><ResponsiveContainer><ComposedChart data={tech}><XAxis dataKey="d" hide /><YAxis {...ax} width={32} /><Tooltip {...tip} formatter={(x) => nf(x, 3)} /><Bar dataKey="hist" name="Istogramma">{tech.map((r, i) => <Cell key={i} fill={r.hist >= 0 ? C.green : C.red} />)}</Bar><Line dataKey="macd" name="MACD" stroke={C.blue} dot={false} /><Line dataKey="sig" name="Signal" stroke={C.amber} dot={false} /></ComposedChart></ResponsiveContainer></SafeChart>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 text-sm">
               <Stat k="Trend" v={trend[0]} c={trend[1]} />
@@ -525,10 +534,10 @@ export default function AnalizzatoreAzionario() {
             <Card title="Analisi fondamentale" meta={<Meta d={f.asOf} src={f.source} extra={f.isLatest === false} />}>
               <p className={`text-xs mb-2 ${th.mute}`}>Ultimo bilancio pubblicato: {f.lastReportDate || "n.d."} · importi in milioni ({q?.currency || ""})</p>
               <div className="grid md:grid-cols-2 gap-4">
-                <SafeChart height={chartH}><ResponsiveContainer><BarChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="y" {...ax} /><YAxis {...ax} width={42} tickFormatter={cf} /><Tooltip {...tip} formatter={(x) => cf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="rev" name="Ricavi" fill="#3b82f6" /><Bar dataKey="ebitda" name="EBITDA" fill="#8b5cf6" /><Bar dataKey="ni" name="Utile netto" fill="#10b981" /></BarChart></ResponsiveContainer></SafeChart>
-                <SafeChart height={chartH}><ResponsiveContainer><LineChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="y" {...ax} /><YAxis {...ax} width={36} unit="%" /><Tooltip {...tip} formatter={(x) => nf(x, 1) + "%"} /><Legend wrapperStyle={{ fontSize: 11 }} /><Line dataKey="gm" name="Margine lordo" stroke="#3b82f6" /><Line dataKey="om" name="Operativo" stroke="#f59e0b" /><Line dataKey="nm" name="Netto" stroke="#10b981" /></LineChart></ResponsiveContainer></SafeChart>
-                <SafeChart height={chartH}><ResponsiveContainer><BarChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="y" {...ax} /><YAxis {...ax} width={42} tickFormatter={cf} /><Tooltip {...tip} formatter={(x) => cf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="fcf" name="Free cash flow" fill="#14b8a6" /><Bar dataKey="eps" name="EPS" fill="#f59e0b" /></BarChart></ResponsiveContainer></SafeChart>
-                <SafeChart height={chartH}><ResponsiveContainer><BarChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="y" {...ax} /><YAxis {...ax} width={36} unit="%" /><Tooltip {...tip} formatter={(x) => pf(x)} /><Bar dataKey="g" name="Crescita ricavi a/a">{annual.map((r, i) => <Cell key={i} fill={r.g >= 0 ? "#10b981" : "#ef4444"} />)}</Bar></BarChart></ResponsiveContainer></SafeChart>
+                <SafeChart height={chartH}><ResponsiveContainer><BarChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="y" {...ax} /><YAxis {...ax} width={42} tickFormatter={cf} /><Tooltip {...tip} formatter={(x) => cf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFmt} /><Bar dataKey="rev" name="Ricavi" fill={C.blue} /><Bar dataKey="ebitda" name="EBITDA" fill={C.purple} /><Bar dataKey="ni" name="Utile netto" fill={C.green} /></BarChart></ResponsiveContainer></SafeChart>
+                <SafeChart height={chartH}><ResponsiveContainer><LineChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="y" {...ax} /><YAxis {...ax} width={36} unit="%" /><Tooltip {...tip} formatter={(x) => nf(x, 1) + "%"} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFmt} /><Line dataKey="gm" name="Margine lordo" stroke={C.blue} /><Line dataKey="om" name="Operativo" stroke={C.amber} /><Line dataKey="nm" name="Netto" stroke={C.green} /></LineChart></ResponsiveContainer></SafeChart>
+                <SafeChart height={chartH}><ResponsiveContainer><BarChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="y" {...ax} /><YAxis {...ax} width={42} tickFormatter={cf} /><Tooltip {...tip} formatter={(x) => cf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFmt} /><Bar dataKey="fcf" name="Free cash flow" fill={C.teal} /><Bar dataKey="eps" name="EPS" fill={C.amber} /></BarChart></ResponsiveContainer></SafeChart>
+                <SafeChart height={chartH}><ResponsiveContainer><BarChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="y" {...ax} /><YAxis {...ax} width={36} unit="%" /><Tooltip {...tip} formatter={(x) => pf(x)} /><Bar dataKey="g" name="Crescita ricavi a/a">{annual.map((r, i) => <Cell key={i} fill={r.g >= 0 ? C.green : C.red} />)}</Bar></BarChart></ResponsiveContainer></SafeChart>
               </div>
               {(f.quarters || []).length > 0 && (
                 <div className="overflow-x-auto mt-3"><table className="w-full text-xs"><thead><tr className={th.mute}><th className="text-left p-1">Trimestre</th><th className="text-right p-1">Ricavi</th><th className="text-right p-1">Utile netto</th><th className="text-right p-1">EPS</th></tr></thead><tbody>{f.quarters.map((r, i) => <tr key={i} className={`border-t ${th.card}`}><td className="p-1">{r.p}</td><td className="text-right p-1">{cf(r.rev)}</td><td className={`text-right p-1 ${cfColor(r.ni)}`}>{cf(r.ni)}</td><td className={`text-right p-1 ${cfColor(r.eps)}`}>{nf(r.eps)}</td></tr>)}</tbody></table></div>
@@ -564,7 +573,7 @@ export default function AnalizzatoreAzionario() {
                 );
               })}</tbody></table></div>
             <SafeChart height={210}>
-              <div className="mt-3"><ResponsiveContainer><BarChart data={valMetrics.filter((m) => !m.k.includes("%"))}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="k" {...ax} /><YAxis {...ax} width={32} /><Tooltip {...tip} formatter={(x) => nf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="v" name="Titolo" fill="#3b82f6" /><Bar dataKey="sector" name="Settore" fill="#94a3b8" /><Bar dataKey="hist5y" name="Storico 5a" fill="#f59e0b" /></BarChart></ResponsiveContainer></div>
+              <div className="mt-3"><ResponsiveContainer><BarChart data={valMetrics.filter((m) => !m.k.includes("%"))}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="k" {...ax} /><YAxis {...ax} width={32} /><Tooltip {...tip} formatter={(x) => nf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFmt} /><Bar dataKey="v" name="Titolo" fill={C.blue} /><Bar dataKey="sector" name="Settore" fill={C.gray} /><Bar dataKey="hist5y" name="Storico 5a" fill={C.amber} /></BarChart></ResponsiveContainer></div>
             </SafeChart>
             {(v.peers || []).length > 0 && <div className={`text-xs mt-2 ${th.mute}`}>Concorrenti: {v.peers.map((c) => `${c.name} (P/E ${nf(c.pe, 1)}, EV/EBITDA ${nf(c.evEbitda, 1)})`).join(" · ")}</div>}
           </Card>
@@ -577,7 +586,7 @@ export default function AnalizzatoreAzionario() {
                 <div>
                   <div className="grid grid-cols-4 gap-2 text-sm mb-2"><Stat k="Prezzo" v={nf(p)} /><Stat k="Target medio" v={nf(a.targetMean)} c={S?.derived.up != null ? (S.derived.up >= 0 ? "text-emerald-500" : "text-red-500") : ""} /><Stat k="Min" v={nf(a.targetMin)} /><Stat k="Max" v={nf(a.targetMax)} /></div>
                   <SafeChart height={150}>
-                    <ResponsiveContainer><BarChart data={[{ k: "Prezzo", v: p }, { k: "Min", v: num(a.targetMin) }, { k: "Medio", v: num(a.targetMean) }, { k: "Max", v: num(a.targetMax) }]}><XAxis dataKey="k" {...ax} /><YAxis {...ax} width={38} /><Tooltip {...tip} formatter={(x) => nf(x)} /><Bar dataKey="v">{["#3b82f6", "#ef4444", "#f59e0b", "#10b981"].map((c, i) => <Cell key={i} fill={c} />)}</Bar></BarChart></ResponsiveContainer>
+                    <ResponsiveContainer><BarChart data={[{ k: "Prezzo", v: p }, { k: "Min", v: num(a.targetMin) }, { k: "Medio", v: num(a.targetMean) }, { k: "Max", v: num(a.targetMax) }]}><XAxis dataKey="k" {...ax} /><YAxis {...ax} width={38} /><Tooltip {...tip} formatter={(x) => nf(x)} /><Bar dataKey="v">{[C.blue, C.red, C.amber, C.green].map((c, i) => <Cell key={i} fill={c} />)}</Bar></BarChart></ResponsiveContainer>
                   </SafeChart>
                   <div className={`text-xs ${th.mute}`}>Upside verso target medio: <span className={cfColor(S?.derived.up)}>{pf(S?.derived.up)}</span> · analisti: {a.nAnalysts ?? "n.d."}</div>
                 </div>
@@ -585,7 +594,7 @@ export default function AnalizzatoreAzionario() {
                   <div className="text-sm font-medium mb-1">Distribuzione rating</div>
                   {pctRatings ? (
                     <SafeChart height={150}>
-                      <ResponsiveContainer><BarChart data={[{ k: "Buy", v: pctRatings.buy }, { k: "Hold", v: pctRatings.hold }, { k: "Sell", v: pctRatings.sell }]}><XAxis dataKey="k" {...ax} /><YAxis {...ax} width={26} allowDecimals={false} /><Tooltip {...tip} /><Bar dataKey="v" name="Analisti">{["#10b981", "#f59e0b", "#ef4444"].map((c, i) => <Cell key={i} fill={c} />)}</Bar></BarChart></ResponsiveContainer>
+                      <ResponsiveContainer><BarChart data={[{ k: "Buy", v: pctRatings.buy }, { k: "Hold", v: pctRatings.hold }, { k: "Sell", v: pctRatings.sell }]}><XAxis dataKey="k" {...ax} /><YAxis {...ax} width={26} allowDecimals={false} /><Tooltip {...tip} /><Bar dataKey="v" name="Analisti">{[C.green, C.amber, C.red].map((c, i) => <Cell key={i} fill={c} />)}</Bar></BarChart></ResponsiveContainer>
                     </SafeChart>
                   ) : <div className={th.mute}>n.d.</div>}
                 </div>
@@ -615,7 +624,7 @@ export default function AnalizzatoreAzionario() {
             <Card title="Punteggi">
               <div className="grid md:grid-cols-2 gap-4 items-center">
                 <SafeChart height={250}>
-                  <ResponsiveContainer><RadarChart data={radar}><PolarGrid stroke={th.grid} /><PolarAngleAxis dataKey="k" tick={{ fill: th.txt, fontSize: 11 }} /><PolarRadiusAxis domain={[0, 100]} tick={{ fontSize: 9, fill: th.txt }} /><Radar dataKey="v" stroke="#10b981" fill="#10b981" fillOpacity={0.35} /><Tooltip {...tip} formatter={(x) => nf(x, 0)} /></RadarChart></ResponsiveContainer>
+                  <ResponsiveContainer><RadarChart data={radar}><PolarGrid stroke={th.grid} /><PolarAngleAxis dataKey="k" tick={{ fill: th.txt, fontSize: 11 }} /><PolarRadiusAxis domain={[0, 100]} tick={{ fontSize: 9, fill: th.txt }} /><Radar dataKey="v" stroke={C.green} fill={C.green} fillOpacity={0.35} /><Tooltip {...tip} formatter={(x) => nf(x, 0)} /></RadarChart></ResponsiveContainer>
                 </SafeChart>
                 <div className="text-sm space-y-1">
                   {Object.entries(WEIGHTS).map(([k, w]) => (<div key={k} className="flex justify-between border-b py-1" style={{ borderColor: th.grid }}><span>{k} <span className={th.mute}>(peso {Math.round(w * 100)}%)</span></span><b>{S.scores[k] != null ? nf(S.scores[k], 0) : "n.d."}</b></div>))}

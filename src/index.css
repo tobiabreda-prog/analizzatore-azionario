@@ -3,3 +3,15 @@
 @tailwind utilities;
 html, body, #root { margin: 0; min-height: 100%; }
 body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+
+/* Colori di testo/icone con contrasto adeguato in entrambi i temi */
+.theme-light .text-emerald-500 { color: #047857; }
+.theme-light .text-red-500 { color: #dc2626; }
+.theme-light .text-amber-500, .theme-light .text-amber-600 { color: #b45309; }
+.theme-light .text-blue-500 { color: #2563eb; }
+.theme-dark .text-emerald-500 { color: #34d399; }
+.theme-dark .text-red-500 { color: #f87171; }
+.theme-dark .text-amber-500, .theme-dark .text-amber-600 { color: #fbbf24; }
+.theme-dark .text-blue-500 { color: #60a5fa; }
+/* Il tooltip dei grafici non deve ereditare colori dal tema */
+.recharts-default-tooltip { box-shadow: 0 4px 14px rgba(0,0,0,.25); }
