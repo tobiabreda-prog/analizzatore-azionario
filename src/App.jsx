@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { ComposedChart, LineChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell } from "recharts";
+import { loadQuote, loadFin, loadVal, loadAnalysts, loadNewsRaw, diagnostics } from "./data.js";
 import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key } from "lucide-react";
 
 const COMMON = (t) => `Sei un analista finanziario. Data odierna: ${new Date().toISOString()}.
@@ -59,7 +60,7 @@ async function callGeminiAPI(systemInstruction, userPrompt, useSearch = true) {
   let apiKey = "";
   try { apiKey = localStorage.getItem("gemini_api_key") || ""; } catch (e) {}
   if (!apiKey) throw new Error("Chiave API Gemini mancante: inseriscila con l'icona della chiave in alto.");
-  let model = "gemini-3-flash-preview";
+  let model = "gemini-3.5-flash-lite";
   try { model = localStorage.getItem("gemini_model") || model; } catch (e) {}
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   
@@ -206,7 +207,12 @@ export default function AnalizzatoreAzionario() {
   const [err, setErr] = useState(null);
   const [hist, setHist] = useState([]);
   const [showKey, setShowKey] = useState(false);
-  const [modelVal, setModelVal] = useState(() => { try { return localStorage.getItem("gemini_model") || "gemini-3-flash-preview"; } catch (e) { return "gemini-3-flash-preview"; } });
+  const [warns, setWarns] = useState([]);
+  const [fhVal, setFhVal] = useState(() => { try { return localStorage.getItem("finnhub_key") || ""; } catch (e) { return ""; } });
+  const [diag, setDiag] = useState(null);
+  const [diagBusy, setDiagBusy] = useState(false);
+  const runDiag = async () => { setDiagBusy(true); setDiag(null); try { setDiag(await diagnostics(fhVal.trim())); } catch (e) { setDiag([{ name: "Diagnostica", ok: false, detail: e.message }]); } setDiagBusy(false); };
+  const [modelVal, setModelVal] = useState(() => { try { return localStorage.getItem("gemini_model") || "gemini-3.5-flash-lite"; } catch (e) { return "gemini-3.5-flash-lite"; } });
   const [testMsg, setTestMsg] = useState("");
   const [models, setModels] = useState([]);
   const [testing, setTesting] = useState(false);
@@ -244,14 +250,56 @@ export default function AnalizzatoreAzionario() {
     if (!resume) setData({});
     setHist((h) => [target, ...h.filter((x) => x.toLowerCase() !== target.toLowerCase())].slice(0, 8));
     const acc = resume ? { ...data } : {};
+    const w = [];
+    setWarns([]);
+    let fhKey = "";
+    try { fhKey = (localStorage.getItem("finnhub_key") || "").trim(); } catch (e) {}
+    const soft = async (k, fn, empty, label) => {
+      try { return await fn(); } catch (e) { w.push(`${label}: dati non disponibili (${e.message.slice(0, 80)})`); setWarns([...w]); return empty; }
+    };
     try {
-      for (let i = 0; i < 5; i++) {
-        const k = ["quote", "fin", "val", "an", "news"][i];
-        if (acc[k]) continue;
-        setStep(i);
-        const d = await callGeminiAPI(COMMON(target) + SCHEMAS[k], TASKS[k](target), true);
-        if (d.error === "not_found") throw new Error("NOT_FOUND");
-        acc[k] = d; setData({ ...acc });
+      if (!acc.quote) {
+        setStep(0);
+        acc.quote = await loadQuote(target);
+        setData({ ...acc });
+      }
+      const sym = acc.quote.ticker;
+      if (!acc.fin) {
+        setStep(1);
+        acc.fin = await soft("fin", () => loadFin(sym), { annual: [], quarters: [], balance: {}, lastReportDate: "", isLatest: false, asOf: new Date().toISOString().slice(0, 10), source: "n.d." }, "Bilanci");
+        setData({ ...acc });
+      }
+      if (!acc.val) {
+        setStep(2);
+        acc.val = await soft("val", () => loadVal(sym, fhKey), { metrics: [], peers: [], asOf: new Date().toISOString().slice(0, 10), source: "n.d." }, "Multipli");
+        if (acc.val.marketCap && !acc.quote.marketCap) acc.quote = { ...acc.quote, marketCap: acc.val.marketCap };
+        setData({ ...acc });
+      }
+      if (!acc.an) {
+        setStep(3);
+        acc.an = await soft("an", () => loadAnalysts(sym, fhKey), { targetMean: null, targetMin: null, targetMax: null, ratings: { buy: 0, hold: 0, sell: 0 }, nAnalysts: 0, asOf: new Date().toISOString().slice(0, 10), source: "n.d." }, "Analisti");
+        setData({ ...acc });
+      }
+      if (!acc.news) {
+        setStep(4);
+        const raw = await soft("news", () => loadNewsRaw(sym, fhKey), [], "Notizie");
+        let news = { items: [], officialSentiment: "n.d.", risks: [], asOf: new Date().toISOString().slice(0, 10), source: "Yahoo Finance" + (fhKey ? " / Finnhub" : "") };
+        if (raw.length) {
+          try {
+            const d = await callGeminiAPI(
+              "Sei un analista finanziario. Lavori SOLO sui titoli forniti: non aggiungere fatti esterni e non inventare nulla. Rispondi solo con JSON valido.",
+              `Titolo: ${acc.quote.name} (${sym}). Notizie recenti (titoli originali, in genere in inglese):\n${JSON.stringify(raw)}\n\nPer ogni notizia: traduci il titolo in ITALIANO, scrivi un riassunto di una frase in ITALIANO basato solo sul titolo/riassunto fornito, classifica il sentiment (pos|neu|neg) dal punto di vista di un azionista. Poi indica in ITALIANO il tono complessivo (\"officialSentiment\": breve frase) e 2-3 rischi che emergono SOLO dalle notizie (\"risks\"). Schema: {\"items\":[{\"date\":\"\",\"title\":\"\",\"sentiment\":\"pos|neu|neg\",\"summary\":\"\",\"source\":\"\"}],\"officialSentiment\":\"\",\"risks\":[\"\",\"\"]}`,
+              false);
+            news = { ...news, ...d, items: Array.isArray(d.items) ? d.items : [], risks: Array.isArray(d.risks) ? d.risks : [] };
+          } catch (e) {
+            w.push("Notizie: traduzione/sentiment non disponibili (" + e.message.slice(0, 80) + ")");
+            setWarns([...w]);
+            news.items = raw.map((r) => ({ date: r.date, title: r.title, sentiment: "neu", summary: r.summary || "", source: r.source }));
+            news.officialSentiment = "Non classificato (servizio Gemini non disponibile)";
+          }
+        }
+        acc.news = news;
+        setData({ ...acc });
       }
       setStep(5);
       const tech = buildTech(acc.quote);
@@ -260,12 +308,12 @@ export default function AnalizzatoreAzionario() {
       const ctx = JSON.stringify({ ...acc, quote: { ...acc.quote, history: undefined }, punteggi: S.scores, punteggioComplessivo: S.overall, etichettaObbligata: label, indicatori: S.derived });
       if (acc.final && !acc.final.failed) { setStep(STEPS.length); return; }
       try {
-        const fin = await callGeminiAPI(`Sei un analista finanziario. L'etichetta ${label} è già stabilita: motiva coerentemente usando SOLO i dati estratti da Investing.com.`, `Dati estratti da Investing.com:\n${ctx}\n${SCHEMAS.final}`, false);
+        const fin = await callGeminiAPI(`Sei un analista finanziario. L'etichetta ${label} è già stabilita: motiva coerentemente usando SOLO i dati forniti (Yahoo Finance e, se presente, Finnhub). I campi null o vuoti non sono disponibili: non inventarli e segnala la mancanza.`, `Dati forniti:\n${ctx}\n${SCHEMAS.final}`, false);
         acc.final = fin; setData({ ...acc });
       } catch (e) { acc.final = { failed: true }; setData({ ...acc }); }
       setStep(STEPS.length);
     } catch (e) {
-      setErr(e.message === "NOT_FOUND" ? "Titolo non trovato su Investing.com. Controlla sigla o nome (es. AAPL, ENI.MI)." : "Errore nel recupero dei dati da Investing.com: " + e.message);
+      setErr(e.message === "NOT_FOUND" ? "Titolo non trovato. Controlla sigla o nome (es. AAPL, ENI.MI)." : "Errore nel recupero dei dati: " + e.message);
       setStep(-1);
     }
   }
@@ -338,12 +386,21 @@ export default function AnalizzatoreAzionario() {
             <div className="font-medium">Chiave API Gemini</div>
             <div className={`text-xs ${th.mute}`}>Salvata solo su questo dispositivo. Creala gratis su aistudio.google.com/apikey</div>
             <input type="password" value={keyVal} onChange={(e) => setKeyVal(e.target.value)} placeholder="AIza…" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
+            <div className="font-medium pt-1">Chiave Finnhub (facoltativa)</div>
+            <div className={`text-xs ${th.mute}`}>Per rating, target price e peer dei titoli USA. Gratis su finnhub.io/register</div>
+            <input type="password" value={fhVal} onChange={(e) => setFhVal(e.target.value)} placeholder="Finnhub API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="font-medium pt-1">Modello</div>
             <input type="text" value={modelVal} onChange={(e) => setModelVal(e.target.value)} className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="flex gap-2">
               <button disabled={testing} onClick={testKey} className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>Testa chiave</button>
-              <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); localStorage.setItem("gemini_model", modelVal.trim() || "gemini-3-flash-preview"); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium">Salva</button>
+              <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); localStorage.setItem("gemini_model", modelVal.trim() || "gemini-3.5-flash-lite"); localStorage.setItem("finnhub_key", fhVal.trim()); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium">Salva</button>
             </div>
+            <button disabled={diagBusy} onClick={runDiag} className={`w-full px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>{diagBusy ? "Test dati in corso…" : "Testa fonti dati"}</button>
+            {diag && (
+              <div className="text-xs space-y-1">
+                {diag.map((r, i) => <div key={i} className="break-words"><span className={r.ok ? "text-emerald-500" : "text-red-500"}>{r.ok ? "✓" : "✗"}</span> {r.name}: {r.detail}</div>)}
+              </div>
+            )}
             {testMsg && <div className={`text-xs break-words ${th.mute}`}>{testMsg}</div>}
             {models.length > 0 && (
               <div className="flex flex-wrap gap-1">
@@ -410,6 +467,13 @@ export default function AnalizzatoreAzionario() {
           <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-3 flex flex-wrap items-center gap-3 text-sm">
             <AlertTriangle className="text-red-500" size={18} /><span className="flex-1 min-w-0 break-words">{err}</span>
             <button onClick={() => run(cur, true)} className="px-3 py-1.5 rounded-lg bg-red-600 text-white">Riprova</button>
+          </div>
+        )}
+
+        {warns.length > 0 && (
+          <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-3 text-xs space-y-1">
+            <div className="font-medium text-sm flex items-center gap-2"><AlertTriangle size={14} className="text-amber-500" />Alcuni dati non sono disponibili</div>
+            {warns.map((x, i) => <div key={i} className="break-words">{x}</div>)}
           </div>
         )}
 
