@@ -7,7 +7,7 @@ jobs:
   apk:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Trova la cartella del progetto
         run: |
@@ -25,11 +25,11 @@ jobs:
             [ -f "$APP_DIR/$f" ] || { echo "::error::File mancante: $f"; exit 1; }
           done
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
@@ -41,6 +41,15 @@ jobs:
           set +o pipefail
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           echo "Licenze gestite"
+
+      # Mantiene la stessa chiave di firma tra una build e l'altra,
+      # cosi' il nuovo APK si installa sopra quello vecchio senza disinstallare.
+      - name: Ripristina chiave di firma
+        id: keystore
+        uses: actions/cache@v5
+        with:
+          path: ~/.android/debug.keystore
+          key: debug-keystore-v1
 
       - name: Installa dipendenze
         working-directory: ${{ env.APP_DIR }}
@@ -62,7 +71,12 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - uses: actions/upload-artifact@v4
+      - name: Impronta della chiave di firma
+        run: |
+          echo "Chiave ripristinata dalla cache: ${{ steps.keystore.outputs.cache-hit }}"
+          keytool -list -keystore ~/.android/debug.keystore -storepass android 2>/dev/null | grep -i "SHA" || echo "Chiave non trovata"
+
+      - uses: actions/upload-artifact@v5
         with:
           name: analizzatore-azionario-apk
           path: ${{ env.APP_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
