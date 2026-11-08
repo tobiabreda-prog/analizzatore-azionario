@@ -157,10 +157,10 @@ async function yseries(symbol, types, years) {
 const lastVal = (s, k) => { const a = s?.[k]; return a?.length ? a[a.length - 1].v : null; };
 const M = (x) => (num(x) == null ? null : round(x / 1e6, 1));
 
-export async function loadFin(symbol) {
-  const annualTypes = ["annualTotalRevenue", "annualNetIncome", "annualEBITDA", "annualGrossProfit", "annualOperatingIncome", "annualDilutedEPS", "annualFreeCashFlow", "annualTotalDebt", "annualNetDebt", "annualStockholdersEquity", "annualCurrentAssets", "annualCurrentLiabilities", "annualInterestExpense", "annualEBIT"];
-  const qTypes = ["quarterlyTotalRevenue", "quarterlyNetIncome", "quarterlyDilutedEPS"];
-  const s = await yseries(symbol, [...annualTypes, ...qTypes], 6);
+const ANNUAL_TYPES = ["annualTotalRevenue", "annualNetIncome", "annualEBITDA", "annualGrossProfit", "annualOperatingIncome", "annualDilutedEPS", "annualFreeCashFlow", "annualTotalDebt", "annualNetDebt", "annualStockholdersEquity", "annualCurrentAssets", "annualCurrentLiabilities", "annualInterestExpense", "annualEBIT"];
+const Q_TYPES = ["quarterlyTotalRevenue", "quarterlyNetIncome", "quarterlyDilutedEPS"];
+
+function buildFin(s) {
   const byYear = {};
   const put = (type, key, conv) => (s[type] || []).forEach((e) => { const y = Number(e.d.slice(0, 4)); (byYear[y] = byYear[y] || { y })[key] = conv(e.v); });
   put("annualTotalRevenue", "rev", M); put("annualNetIncome", "ni", M); put("annualEBITDA", "ebitda", M);
@@ -207,15 +207,13 @@ async function fh(path, params, key) {
 }
 const isUS = (sym) => !/[.:]/.test(sym);
 
-export async function loadVal(symbol, fhKey) {
-  const types = [...Object.values(VAL_TYPES), "trailingMarketCap"];
-  const s = await yseries(symbol, types, 1.2);
+async function buildVal(s, symbol, fhKey) {
   const own = {};
   Object.entries(VAL_TYPES).forEach(([k, t]) => { own[k] = round(lastVal(s, t), 2); });
   let peers = [], sector = {};
   if (fhKey && isUS(symbol)) {
     try {
-      const list = (await fh("/stock/peers", { symbol }, fhKey)).filter((p) => p !== symbol && isUS(p)).slice(0, 5);
+      const list = (await fh("/stock/peers", { symbol }, fhKey)).filter((p) => p !== symbol && isUS(p)).slice(0, 4);
       const res = await Promise.allSettled(list.map((p) => yseries(p, [VAL_TYPES["P/E"], VAL_TYPES["P/E forward"], VAL_TYPES["P/B"], VAL_TYPES["P/S"], VAL_TYPES["EV/EBITDA"]], 1.2)));
       const vals = res.map((r, i) => (r.status === "fulfilled" ? { name: list[i], s: r.value } : null)).filter(Boolean);
       peers = vals.map((p) => ({ name: p.name, pe: round(lastVal(p.s, VAL_TYPES["P/E"]), 1), evEbitda: round(lastVal(p.s, VAL_TYPES["EV/EBITDA"]), 1) }));
@@ -224,6 +222,14 @@ export async function loadVal(symbol, fhKey) {
   }
   const metrics = Object.keys(VAL_TYPES).filter((k) => own[k] != null).map((k) => ({ k, v: own[k], sector: sector[k] ?? null, hist5y: null }));
   return { metrics, peers, marketCap: lastVal(s, "trailingMarketCap"), asOf: new Date().toISOString().slice(0, 10), source: "Yahoo Finance" + (peers.length ? " + Finnhub (peer)" : "") };
+}
+
+// Una sola chiamata a Yahoo per bilanci e multipli (prima erano due)
+export async function loadFundamentals(symbol, fhKey) {
+  const s = await yseries(symbol, [...ANNUAL_TYPES, ...Q_TYPES, ...Object.values(VAL_TYPES), "trailingMarketCap"], 6);
+  const fin = buildFin(s);
+  const val = await buildVal(s, symbol, fhKey);
+  return { fin, val };
 }
 
 export async function loadAnalysts(symbol, fhKey) {
@@ -248,22 +254,14 @@ export async function loadAnalysts(symbol, fhKey) {
   return out;
 }
 
-export async function loadNewsRaw(symbol, fhKey) {
+export async function loadNewsRaw(symbol) {
   const items = [];
   try {
-    const r = await yget("/v1/finance/search", { q: symbol, quotesCount: 0, newsCount: 10, lang: "en-US" });
+    const r = await yget("/v1/finance/search", { q: symbol, quotesCount: 0, newsCount: 8, lang: "en-US" });
     (r.data?.news || []).forEach((n) => n?.title && items.push({ date: n.providerPublishTime ? isoDate(n.providerPublishTime) : "", title: n.title, source: n.publisher || "Yahoo Finance" }));
   } catch (e) { /* ignora */ }
-  if (fhKey && isUS(symbol)) {
-    try {
-      const to = new Date(), from = new Date(Date.now() - 14 * 864e5);
-      const d = (x) => x.toISOString().slice(0, 10);
-      const list = await fh("/company-news", { symbol, from: d(from), to: d(to) }, fhKey);
-      (list || []).slice(0, 8).forEach((n) => n?.headline && items.push({ date: n.datetime ? isoDate(n.datetime) : "", title: n.headline, source: n.source || "Finnhub", summary: (n.summary || "").slice(0, 280) }));
-    } catch (e) { /* ignora */ }
-  }
   const seen = new Set();
-  return items.filter((i) => { const k = i.title.toLowerCase().slice(0, 60); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 10);
+  return items.filter((i) => { const k = i.title.toLowerCase().slice(0, 60); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 8);
 }
 
 // ---------- Diagnostica ----------
@@ -275,9 +273,8 @@ export async function diagnostics(fhKey) {
   };
   await t("Yahoo: prezzi AAPL", async () => { const c = await chartFor("AAPL"); return `${c.rows.length} giorni, ultimo ${c.rows[c.rows.length - 1].date}`; });
   await t("Yahoo: prezzi ENI.MI", async () => { const c = await chartFor("ENI.MI"); return `${c.rows.length} giorni`; });
-  await t("Yahoo: bilanci AAPL", async () => { const f = await loadFin("AAPL"); return `${f.annual.length} anni, ${f.quarters.length} trimestri`; });
-  await t("Yahoo: multipli AAPL", async () => { const v = await loadVal("AAPL", null); return `${v.metrics.length} multipli`; });
-  await t("Yahoo: notizie AAPL", async () => { const n = await loadNewsRaw("AAPL", null); return `${n.length} notizie`; });
+  await t("Yahoo: bilanci e multipli AAPL", async () => { const { fin, val } = await loadFundamentals("AAPL", null); return `${fin.annual.length} anni, ${fin.quarters.length} trimestri, ${val.metrics.length} multipli`; });
+  await t("Yahoo: notizie AAPL", async () => { const n = await loadNewsRaw("AAPL"); return `${n.length} notizie`; });
   if (fhKey) {
     await t("Finnhub: rating AAPL", async () => { const r = await fh("/stock/recommendation", { symbol: "AAPL" }, fhKey); return `${r?.length || 0} periodi`; });
     await t("Finnhub: target AAPL", async () => { const r = await fh("/stock/price-target", { symbol: "AAPL" }, fhKey); return r?.targetMean ? `media ${r.targetMean}` : "vuoto"; });

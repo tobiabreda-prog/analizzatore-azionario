@@ -1,0 +1,187 @@
+name: Build APK
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Trova la cartella del progetto
+        run: |
+          echo "Contenuto del repository:"
+          find . -maxdepth 3 -not -path "./.git/*" -not -path "*/node_modules/*" | sort
+          PKG=$(find . -name package.json -not -path "*/node_modules/*" | head -n 1)
+          if [ -z "$PKG" ]; then
+            echo "::error::package.json non trovato nel repository: i file non sono stati caricati correttamente."
+            exit 1
+          fi
+          APP_DIR=$(dirname "$PKG")
+          echo "Cartella progetto: $APP_DIR"
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+          for f in index.html vite.config.js tailwind.config.js postcss.config.js capacitor.config.json src/main.jsx src/App.jsx src/index.css; do
+            [ -f "$APP_DIR/$f" ] || { echo "::error::File mancante: $f"; exit 1; }
+          done
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Prepara Android SDK (gia' presente sul runner)
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" || true
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          echo "Licenze gestite"
+
+      # Mantiene la stessa chiave di firma tra una build e l'altra,
+      # cosi' il nuovo APK si installa sopra quello vecchio senza disinstallare.
+      - name: Ripristina chiave di firma
+        id: keystore
+        uses: actions/cache@v5
+        with:
+          path: ~/.android/debug.keystore
+          key: debug-keystore-v1
+
+      - name: Installa dipendenze
+        working-directory: ${{ env.APP_DIR }}
+        run: npm install --no-audit --no-fund
+
+      - name: Build web
+        working-directory: ${{ env.APP_DIR }}
+        run: npm run build
+
+      - name: Aggiungi piattaforma Android
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Icona personalizzata (moneta da 1 euro)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          if [ -f res-icons.zip ]; then
+            unzip -o res-icons.zip -d android/app/src/main/res
+            echo "Icona personalizzata applicata"
+            ls -la android/app/src/main/res/mipmap-xxxhdpi
+          else
+            echo "::warning::res-icons.zip non trovato nel repository: resta l'icona predefinita"
+          fi
+
+      - name: Stampa report su Android (plugin nativo)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          MAIN=$(find android/app/src/main/java -name MainActivity.java | head -n 1)
+          if [ -z "$MAIN" ]; then echo "::error::MainActivity.java non trovato"; exit 1; fi
+          DIR=$(dirname "$MAIN")
+          PKG=$(grep -m1 '^package ' "$MAIN" | sed 's/^package \(.*\);.*/\1/')
+          echo "Pacchetto Android: $PKG"
+          cat > "$DIR/PrintReportPlugin.java" <<'JAVA'
+          package __PKG__;
+
+          import android.content.Context;
+          import android.print.PrintAttributes;
+          import android.print.PrintDocumentAdapter;
+          import android.print.PrintManager;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          @CapacitorPlugin(name = "PrintReport")
+          public class PrintReportPlugin extends Plugin {
+
+              // Riferimento tenuto vivo finche' la finestra di stampa e' aperta
+              private WebView printWebView;
+
+              @PluginMethod
+              public void print(final PluginCall call) {
+                  final String html = call.getString("html", "");
+                  final String name = call.getString("name", "Report");
+                  if (html == null || html.isEmpty()) {
+                      call.reject("Report vuoto");
+                      return;
+                  }
+                  getActivity().runOnUiThread(new Runnable() {
+                      @Override
+                      public void run() {
+                          try {
+                              final WebView web = new WebView(getActivity());
+                              web.getSettings().setJavaScriptEnabled(false);
+                              web.setWebViewClient(new WebViewClient() {
+                                  private boolean done = false;
+
+                                  @Override
+                                  public void onPageFinished(WebView view, String url) {
+                                      if (done) return;
+                                      done = true;
+                                      try {
+                                          PrintManager pm = (PrintManager) getActivity().getSystemService(Context.PRINT_SERVICE);
+                                          PrintDocumentAdapter adapter = view.createPrintDocumentAdapter(name);
+                                          PrintAttributes attrs = new PrintAttributes.Builder()
+                                                  .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                                                  .build();
+                                          pm.print(name, adapter, attrs);
+                                          JSObject res = new JSObject();
+                                          res.put("started", true);
+                                          call.resolve(res);
+                                      } catch (Exception e) {
+                                          call.reject("Impossibile aprire la finestra di stampa: " + e.getMessage());
+                                      }
+                                  }
+                              });
+                              printWebView = web;
+                              web.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+                          } catch (Exception e) {
+                              call.reject("Errore di stampa: " + e.getMessage());
+                          }
+                      }
+                  });
+              }
+          }
+          JAVA
+          cat > "$DIR/MainActivity.java" <<'JAVA'
+          package __PKG__;
+
+          import android.os.Bundle;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  registerPlugin(PrintReportPlugin.class);
+                  super.onCreate(savedInstanceState);
+              }
+          }
+          JAVA
+          sed -i "s/__PKG__/$PKG/g" "$DIR/PrintReportPlugin.java" "$DIR/MainActivity.java"
+          grep -n "registerPlugin" "$DIR/MainActivity.java"
+
+      - name: Compila APK
+        working-directory: ${{ env.APP_DIR }}/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Impronta della chiave di firma
+        run: |
+          echo "Chiave ripristinata dalla cache: ${{ steps.keystore.outputs.cache-hit }}"
+          keytool -list -keystore ~/.android/debug.keystore -storepass android 2>/dev/null | grep -i "SHA" || echo "Chiave non trovata"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: analizzatore-azionario-apk
+          path: ${{ env.APP_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

@@ -1,36 +1,8 @@
 import { useState, useMemo } from "react";
 import { ComposedChart, LineChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell } from "recharts";
-import { loadQuote, loadFin, loadVal, loadAnalysts, loadNewsRaw, diagnostics } from "./data.js";
-import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key } from "lucide-react";
-
-const COMMON = (t) => `Sei un analista finanziario. Data odierna: ${new Date().toISOString()}.
-REGOLE RIGIDE SULLE FONTI DI DATI PER ${t}:
-1. PER I DATI CORRENTI E AGGIORNATI AD OGGI: Usa ESCLUSIVAMENTE INVESTING.COM (it.investing.com o www.investing.com) tramite la ricerca Google.
-2. PER I DATI STORICI (bilanci passati, multipli storici, serie storiche dei prezzi): Cerca e verifica sui siti ufficiali di: Yahoo Finance, SEC EDGAR, FRED (Federal Reserve Economic Data), dati accademici (Fama-French, Robert Shiller, Aswath Damodaran), Borsa Italiana, Alpha Vantage, MacroTrends e StockAnalysis.
-3. CRITERIO DI CONSENSO: Se riscontri discrepanze nei dati storici tra diverse fonti, seleziona sempre i valori maggiormente condivisi dalla maggioranza delle fonti citate.
-4. Non inventare MAI numeri: se un dato non è reperibile usa null.
-5. In ogni blocco indica "source" (es. "Investing.com" o "Consenso: Yahoo Finance / SEC EDGAR / MacroTrends") e "asOf" (data YYYY-MM-DD). Numeri come number (non stringhe); percentuali in punti percentuali (es. 12.5). Se "${t}" non corrisponde a nessun titolo quotato rispondi {"error":"not_found"}. Schema JSON richiesto:\n`;
-
-const SCHEMAS = {
-  quote: `{"name":"","ticker":"","exchange":"","currency":"","price":0,"prevClose":0,"changePct":0,"marketCap":0,"asOf":"","source":"Investing.com","sma50":null,"sma200":null,"rsi14":null,"support":[0,0],"resistance":[0,0],"history":[["YYYY-MM-DD",chiusuraSettimanale,volumeSettimanale]]}  -- quotazione corrente da Investing.com; history: ultime ~104 chiusure SETTIMANALI storiche (2 anni) verificate su Yahoo Finance / Borsa Italiana / StockAnalysis, ordine cronologico, volume in milioni.`,
-  fin: `{"annual":[{"y":2025,"rev":0,"ni":0,"ebitda":0,"gp":0,"op":0,"eps":0,"fcf":0}],"quarters":[{"p":"Q1 2026","rev":0,"ni":0,"eps":0}],"balance":{"netDebt":0,"totalDebt":0,"equity":0,"currentRatio":0,"interestCover":0,"roe":0,"roic":0},"lastReportDate":"","isLatest":true,"asOf":"","source":"SEC EDGAR / Yahoo Finance / MacroTrends"}  -- bilanci storici (ultimi 4-5 anni) e trimestrali recuperati da SEC EDGAR, Yahoo Finance, MacroTrends, StockAnalysis (importi in milioni).`,
-  val: `{"metrics":[{"k":"P/E","v":0,"sector":0,"hist5y":0}],"peers":[{"name":"","pe":0,"evEbitda":0}],"asOf":"","source":"Investing.com / Damodaran / StockAnalysis"}  -- multipli attuali da Investing.com; medie storiche 5a e parametri di settore da Damodaran / StockAnalysis / MacroTrends.`,
-  an: `{"targetMean":0,"targetMin":0,"targetMax":0,"ratings":{"buy":0,"hold":0,"sell":0},"nAnalysts":0,"asOf":"","source":"Investing.com"}  -- target price e rating correnti da Investing.com.`,
-  news: `{"items":[{"date":"","title":"","sentiment":"pos|neu|neg","summary":"","source":""}],"officialSentiment":"","risks":["",""],"asOf":"","source":"Alpha Vantage / Yahoo Finance / Finviz / SEC EDGAR"}  -- TRADUCI SEMPRE E OBBLIGATORIAMENTE TUTTI I TITOLI ("title"), I RIASSUNTI ("summary"), IL TONO UFFICIALE ("officialSentiment") E I RISCHI ("risks") IN LINGUA ITALIANA. Sentiment integrato in 3 livelli: 1) Score di base Alpha Vantage; 2) Notizie Yahoo Finance / Finviz analizzate con approccio NLP/FinBERT; 3) Tono dei filing SEC EDGAR (8-K, 10-K) valutato tramite dizionario Loughran-McDonald.`,
-  final: `{"horizon":"","motivation":"5-8 righe che citano numeri concreti dai dati estratti","strengths":["","",""],"risks":["",""],"entry":"","stop":"","target":""}  -- livelli indicativi in valuta del titolo.`,
-};
-
-const TASKS = {
-  quote: (t) => `Cerca su Investing.com la quotazione corrente, i dati tecnici aggiornati (SMA50, SMA200, RSI 14, supporti, resistenze) per: ${t}. Per lo storico prezzi degli ultimi 1-2 anni fai riferimento a Yahoo Finance, Borsa Italiana o StockAnalysis.`,
-  fin: (t) => `Cerca i bilanci annuali storici (ultimi 4-5 anni), i dati trimestrali e lo stato patrimoniale di ${t} incrociando i dati di SEC EDGAR, Yahoo Finance, MacroTrends e StockAnalysis (usa la maggioranza in caso di discrepanze).`,
-  val: (t) => `Cerca i multipli di valutazione attuali su Investing.com per ${t}. Per le medie storiche a 5 anni e le metriche di settore/concorrenti, consulta Damodaran, MacroTrends e StockAnalysis.`,
-  an: (t) => `Cerca nella sezione Target degli Analisti / Consenso di Investing.com il target price e la distribuzione dei rating per: ${t}.`,
-  news: (t) => `Esegui un'analisi del sentiment a tre livelli per ${t}:
-1. Base rapida: recupera lo score di sentiment automatico e backtestabile di Alpha Vantage.
-2. Approfondimento notizie: raccogli gli ultimi titoli/notizie da Yahoo Finance e Finviz ed effettua una classificazione NLP fine (stile FinBERT: pos, neu, neg).
-3. Tono ufficiale: esamina gli ultimi filing SEC EDGAR (es. 8-K, 10-K, relazioni trimestrali) applicando i criteri del dizionario finanziario Loughran-McDonald (misurando tono positivo/negativo/incertezza nella comunicazione diretta dell'azienda).
-IMPORTANTE: Traduci SEMPRE tutti i testi (titoli delle notizie, sintesi, analisi del tono ufficiale e descrizione dei rischi) rigorosamente in ITALIANO. Riassumi i risultati principali, le notizie più rilevanti e i rischi emersi.`,
-};
+import { loadQuote, loadFundamentals, loadAnalysts, loadNewsRaw, diagnostics } from "./data.js";
+import { printReport } from "./report.js";
+import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key, Printer } from "lucide-react";
 
 const POPULAR_TICKERS = [
   { ticker: "AAPL", name: "Apple Inc." },
@@ -67,7 +39,7 @@ async function callGeminiAPI(systemInstruction, userPrompt, useSearch = true) {
   const payload = {
     contents: [{ role: "user", parts: [{ text: userPrompt }] }],
     systemInstruction: { parts: [{ text: systemInstruction }] },
-    generationConfig: { responseMimeType: "application/json" }
+    generationConfig: { responseMimeType: "application/json", temperature: 0.3, maxOutputTokens: 3072 }
   };
 
   if (useSearch) {
@@ -144,7 +116,7 @@ function rsi(a, n = 14) {
   return out;
 }
 
-const STEPS = ["Recupero quotazioni…", "Analisi bilanci…", "Multipli e confronto settore…", "Target e rating analisti…", "Notizie e rischi…", "Giudizio finale…"];
+const STEPS = ["Quotazioni e storico…", "Bilanci e multipli…", "Rating degli analisti…", "Notizie e giudizio…"];
 const WEIGHTS = { "Trend tecnico": 0.2, Crescita: 0.2, Redditività: 0.15, "Solidità finanziaria": 0.15, Valutazione: 0.15, Sentiment: 0.15 };
 
 function buildTech(q) {
@@ -197,6 +169,63 @@ function SafeChart({ height = 190, children }) {
   );
 }
 
+// ---------- Una sola chiamata a Gemini: giudizio + traduzione/sentiment delle notizie ----------
+const TODAY = () => new Date().toISOString().slice(0, 10);
+const EMPTY_FIN = () => ({ annual: [], quarters: [], balance: {}, lastReportDate: "", isLatest: false, asOf: TODAY(), source: "n.d." });
+const EMPTY_VAL = () => ({ metrics: [], peers: [], asOf: TODAY(), source: "n.d." });
+const EMPTY_AN = () => ({ targetMean: null, targetMin: null, targetMax: null, ratings: { buy: 0, hold: 0, sell: 0 }, nAnalysts: 0, asOf: TODAY(), source: "n.d." });
+
+const SYSTEM_PROMPT = "Sei un analista finanziario prudente. Usa SOLO i dati forniti: i campi assenti non sono disponibili, non inventarli e segnala la mancanza. L'etichetta indicata è già decisa: motivala senza contraddirla. Scrivi in italiano. Rispondi solo con JSON valido.";
+const OUTPUT_SCHEMA = '{"horizon":"es. 6-12 mesi","motivation":"4-6 frasi con numeri dai dati","strengths":["max 12 parole","",""],"risks":["max 12 parole",""],"entry":"","stop":"","target":"","news":{"tone":"1 frase sul tono delle notizie","risks":["max 2 rischi emersi dalle notizie"],"items":[{"i":0,"t":"titolo tradotto in italiano","s":"pos|neu|neg"}]}}';
+
+function buildUserPrompt(acc, S, label) {
+  const q = acc.quote, f = acc.fin || {}, v = acc.val || {}, a = acc.an || {};
+  const d = {
+    titolo: `${q.name} (${q.ticker}) ${q.currency || ""}`.trim(),
+    oggi: TODAY(),
+    etichetta: label,
+    punteggio: S.overall,
+    punteggi: S.scores,
+    prezzo: { p: q.price, var: q.changePct, sma50: q.sma50, sma200: q.sma200, rsi: q.rsi14, sup: (q.support || []).filter((x) => x != null), res: (q.resistance || []).filter((x) => x != null), cap: q.marketCap },
+    annuali: (f.annual || []).slice(-4).map((r) => ({ y: r.y, rev: r.rev, ni: r.ni, ebitda: r.ebitda, fcf: r.fcf, eps: r.eps })),
+    trimestri: (f.quarters || []).slice(-4),
+    bilancio: f.balance,
+    multipli: (v.metrics || []).map((m) => `${m.k} ${m.v}${m.sector != null ? ` (settore ${m.sector})` : ""}`),
+    analisti: a.nAnalysts || a.targetMean ? { tgt: a.targetMean, min: a.targetMin, max: a.targetMax, ...a.ratings } : undefined,
+    indicatori: S.derived,
+    notizie: (acc.newsRaw || []).map((r, i) => `${i}|${r.date}|${r.title}`),
+  };
+  const json = JSON.stringify(d, (k, x) => (x === null || x === undefined || (Array.isArray(x) && !x.length) ? undefined : typeof x === "number" ? Math.round(x * 100) / 100 : x));
+  return `Dati (campi mancanti = non disponibili):\n${json}\n\nIn "news.items" inserisci una voce per ogni notizia (stesso indice i; titolo tradotto in italiano; s = sentiment per un azionista). Se non ci sono notizie ometti "news". Schema:\n${OUTPUT_SCHEMA}`;
+}
+
+function mergeNews(acc, nw) {
+  const raw = acc.newsRaw || [];
+  const byI = {};
+  (Array.isArray(nw?.items) ? nw.items : []).forEach((x) => { if (x && Number.isInteger(x.i)) byI[x.i] = x; });
+  return {
+    items: raw.map((r, i) => ({ date: r.date, title: byI[i]?.t || r.title, sentiment: ["pos", "neu", "neg"].includes(byI[i]?.s) ? byI[i].s : "neu", source: r.source })),
+    officialSentiment: nw?.tone || (nw ? "n.d." : raw.length ? "Non classificato (servizio Gemini non disponibile)" : "n.d."),
+    risks: Array.isArray(nw?.risks) ? nw.risks.filter(Boolean).slice(0, 3) : [],
+    asOf: TODAY(),
+    source: "Yahoo Finance",
+  };
+}
+
+// ---------- Memoria locale: stesso titolo entro 30 minuti = nessuna nuova richiesta ----------
+const CACHE_KEY = "an_cache_v2", CACHE_TTL = 30 * 60 * 1000;
+const cKey = (t) => t.trim().toUpperCase();
+function cacheRead() { try { return JSON.parse(localStorage.getItem(CACHE_KEY)) || {}; } catch (e) { return {}; } }
+function cacheGet(t) { const e = cacheRead()[cKey(t)]; return e && Date.now() - e.ts < CACHE_TTL ? e : null; }
+function cachePut(keys, data, warns) {
+  try {
+    const all = cacheRead(), ts = Date.now();
+    keys.forEach((k) => { all[cKey(k)] = { ts, data, warns }; });
+    const fresh = Object.entries(all).filter(([, e]) => ts - e.ts < CACHE_TTL).sort((x, y) => y[1].ts - x[1].ts).slice(0, 10);
+    localStorage.setItem(CACHE_KEY, JSON.stringify(Object.fromEntries(fresh)));
+  } catch (e) { /* memoria piena o non disponibile */ }
+}
+
 export default function AnalizzatoreAzionario() {
   const [dark, setDark] = useState(false);
   const [input, setInput] = useState("");
@@ -208,6 +237,7 @@ export default function AnalizzatoreAzionario() {
   const [hist, setHist] = useState([]);
   const [showKey, setShowKey] = useState(false);
   const [warns, setWarns] = useState([]);
+  const [cachedAt, setCachedAt] = useState(null);
   const [fhVal, setFhVal] = useState(() => { try { return localStorage.getItem("finnhub_key") || ""; } catch (e) { return ""; } });
   const [diag, setDiag] = useState(null);
   const [diagBusy, setDiagBusy] = useState(false);
@@ -247,78 +277,73 @@ export default function AnalizzatoreAzionario() {
     return POPULAR_TICKERS.filter(item => item.ticker.toLowerCase().includes(q) || item.name.toLowerCase().includes(q)).slice(0, 5);
   }, [input]);
 
-  async function run(t, resume) {
+  async function run(t, resume, force) {
     const target = (t ?? input).trim(); if (!target || busy) return;
     setShowSuggestions(false);
-    setCur(target); setErr(null); setStep(0);
-    if (!resume) setData({});
+    setCur(target); setErr(null);
     setHist((h) => [target, ...h.filter((x) => x.toLowerCase() !== target.toLowerCase())].slice(0, 8));
+    if (!resume && !force) {
+      const hit = cacheGet(target);
+      if (hit) { setData(hit.data); setWarns(hit.warns || []); setCachedAt(hit.ts); setStep(STEPS.length); return; }
+    }
+    setCachedAt(null); setStep(0);
+    if (!resume) setData({});
     const acc = resume ? { ...data } : {};
     const w = [];
     setWarns([]);
     let fhKey = "";
     try { fhKey = (localStorage.getItem("finnhub_key") || "").trim(); } catch (e) {}
-    const soft = async (k, fn, empty, label) => {
+    const soft = async (fn, empty, label) => {
       try { return await fn(); } catch (e) { w.push(`${label}: dati non disponibili (${e.message.slice(0, 80)})`); setWarns([...w]); return empty; }
     };
     try {
       if (!acc.quote) {
-        setStep(0);
         acc.quote = await loadQuote(target);
         setData({ ...acc });
       }
       const sym = acc.quote.ticker;
-      if (!acc.fin) {
+      if (!acc.fin || !acc.val) {
         setStep(1);
-        acc.fin = await soft("fin", () => loadFin(sym), { annual: [], quarters: [], balance: {}, lastReportDate: "", isLatest: false, asOf: new Date().toISOString().slice(0, 10), source: "n.d." }, "Bilanci");
-        setData({ ...acc });
-      }
-      if (!acc.val) {
-        setStep(2);
-        acc.val = await soft("val", () => loadVal(sym, fhKey), { metrics: [], peers: [], asOf: new Date().toISOString().slice(0, 10), source: "n.d." }, "Multipli");
+        const r = await soft(() => loadFundamentals(sym, fhKey), { fin: EMPTY_FIN(), val: EMPTY_VAL() }, "Bilanci e multipli");
+        acc.fin = r.fin; acc.val = r.val;
         if (acc.val.marketCap && !acc.quote.marketCap) acc.quote = { ...acc.quote, marketCap: acc.val.marketCap };
         setData({ ...acc });
       }
       if (!acc.an) {
-        setStep(3);
-        acc.an = await soft("an", () => loadAnalysts(sym, fhKey), { targetMean: null, targetMin: null, targetMax: null, ratings: { buy: 0, hold: 0, sell: 0 }, nAnalysts: 0, asOf: new Date().toISOString().slice(0, 10), source: "n.d." }, "Analisti");
+        setStep(2);
+        acc.an = await soft(() => loadAnalysts(sym, fhKey), EMPTY_AN(), "Analisti");
         setData({ ...acc });
       }
-      if (!acc.news) {
-        setStep(4);
-        const raw = await soft("news", () => loadNewsRaw(sym, fhKey), [], "Notizie");
-        let news = { items: [], officialSentiment: "n.d.", risks: [], asOf: new Date().toISOString().slice(0, 10), source: "Yahoo Finance" + (fhKey ? " / Finnhub" : "") };
-        if (raw.length) {
-          try {
-            const d = await callGeminiAPI(
-              "Sei un analista finanziario. Lavori SOLO sui titoli forniti: non aggiungere fatti esterni e non inventare nulla. Rispondi solo con JSON valido.",
-              `Titolo: ${acc.quote.name} (${sym}). Notizie recenti (titoli originali, in genere in inglese):\n${JSON.stringify(raw)}\n\nPer ogni notizia: traduci il titolo in ITALIANO, scrivi un riassunto di una frase in ITALIANO basato solo sul titolo/riassunto fornito, classifica il sentiment (pos|neu|neg) dal punto di vista di un azionista. Poi indica in ITALIANO il tono complessivo (\"officialSentiment\": breve frase) e 2-3 rischi che emergono SOLO dalle notizie (\"risks\"). Schema: {\"items\":[{\"date\":\"\",\"title\":\"\",\"sentiment\":\"pos|neu|neg\",\"summary\":\"\",\"source\":\"\"}],\"officialSentiment\":\"\",\"risks\":[\"\",\"\"]}`,
-              false);
-            news = { ...news, ...d, items: Array.isArray(d.items) ? d.items : [], risks: Array.isArray(d.risks) ? d.risks : [] };
-          } catch (e) {
-            w.push("Notizie: traduzione/sentiment non disponibili (" + e.message.slice(0, 80) + ")");
-            setWarns([...w]);
-            news.items = raw.map((r) => ({ date: r.date, title: r.title, sentiment: "neu", summary: r.summary || "", source: r.source }));
-            news.officialSentiment = "Non classificato (servizio Gemini non disponibile)";
-          }
+      setStep(3);
+      if (!acc.newsRaw) acc.newsRaw = await soft(() => loadNewsRaw(sym), [], "Notizie");
+      if (!acc.final || acc.final.failed) {
+        const S = computeScores(acc, buildTech(acc.quote));
+        try {
+          const out = await callGeminiAPI(SYSTEM_PROMPT, buildUserPrompt(acc, S, labelOf(S.overall)), false);
+          const { news: nw, ...fin } = out;
+          acc.final = fin; acc.news = mergeNews(acc, nw);
+        } catch (e) {
+          acc.final = { failed: true };
+          acc.news = mergeNews(acc, null);
+          w.push("Commento e notizie: Gemini non disponibile (" + e.message.slice(0, 120) + ")"); setWarns([...w]);
         }
-        acc.news = news;
         setData({ ...acc });
       }
-      setStep(5);
-      const tech = buildTech(acc.quote);
-      const S = computeScores(acc, tech);
-      const label = labelOf(S.overall);
-      const ctx = JSON.stringify({ ...acc, quote: { ...acc.quote, history: undefined }, punteggi: S.scores, punteggioComplessivo: S.overall, etichettaObbligata: label, indicatori: S.derived });
-      if (acc.final && !acc.final.failed) { setStep(STEPS.length); return; }
-      try {
-        const fin = await callGeminiAPI(`Sei un analista finanziario. L'etichetta ${label} è già stabilita: motiva coerentemente usando SOLO i dati forniti (Yahoo Finance e, se presente, Finnhub). I campi null o vuoti non sono disponibili: non inventarli e segnala la mancanza.`, `Dati forniti:\n${ctx}\n${SCHEMAS.final}`, false);
-        acc.final = fin; setData({ ...acc });
-      } catch (e) { acc.final = { failed: true }; setData({ ...acc }); }
       setStep(STEPS.length);
+      if (acc.final && !acc.final.failed) cachePut([target, sym], acc, w);
     } catch (e) {
       setErr(e.message === "NOT_FOUND" ? "Titolo non trovato. Controlla sigla o nome (es. AAPL, ENI.MI)." : "Errore nel recupero dei dati: " + e.message);
       setStep(-1);
+    }
+  }
+
+  async function doPrint() {
+    if (!S || !q) return;
+    try {
+      await printReport({ data, tech, S, label: labelOf(S.overall), warns });
+    } catch (e) {
+      const m = String(e.message || e);
+      setWarns((x) => [...x, /not implemented|UNIMPLEMENTED/i.test(m) ? "Stampa non disponibile in questa versione dell'app: installa l'ultimo APK." : "Stampa non riuscita: " + m.slice(0, 120)]);
     }
   }
 
@@ -384,7 +409,7 @@ export default function AnalizzatoreAzionario() {
     <div className={`min-h-screen ${th.bg} ${dark ? "theme-dark" : "theme-light"}`}>
       <div className="max-w-5xl mx-auto p-3 sm:p-5 space-y-4">
         <div className="flex items-center justify-between gap-2">
-          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2"><TrendingUp className="text-emerald-500" />Analizzatore Azionario Gemini</h1>
+          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2"><TrendingUp className="text-emerald-500" />Analisi Finanziaria</h1>
           <div className="flex gap-2">
             <button onClick={() => setShowKey(!showKey)} className={`p-2 rounded-lg border ${th.card}`} aria-label="Chiave API"><Key size={16} /></button>
             <button onClick={() => setDark(!dark)} className={`p-2 rounded-lg border ${th.card}`} aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
@@ -479,6 +504,10 @@ export default function AnalizzatoreAzionario() {
           </div>
         )}
 
+        {cachedAt && step === STEPS.length && (
+          <div className={`rounded-xl border p-2 text-xs flex items-center gap-2 ${th.card}`}><Clock size={13} />Dati salvati alle {new Date(cachedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}: nessuna nuova richiesta. Tocca "Aggiorna dati" per ricaricare.</div>
+        )}
+
         {warns.length > 0 && (
           <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-3 text-xs space-y-1">
             <div className="font-medium text-sm flex items-center gap-2"><AlertTriangle size={14} className="text-amber-500" />Alcuni dati non sono disponibili</div>
@@ -498,7 +527,8 @@ export default function AnalizzatoreAzionario() {
               </div>
               <div className="flex gap-2 items-center">
                 <Stat k="Capitalizzazione" v={cf(q.marketCap)} />
-                <button onClick={() => run(cur)} disabled={busy} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-1.5 disabled:opacity-50 ${th.card}`}><RefreshCw size={14} className={busy ? "animate-spin" : ""} />Aggiorna dati</button>
+                <button onClick={() => run(cur, false, true)} disabled={busy} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-1.5 disabled:opacity-50 ${th.card}`}><RefreshCw size={14} className={busy ? "animate-spin" : ""} />Aggiorna dati</button>
+                <button onClick={doPrint} disabled={busy || step !== STEPS.length} aria-label="Stampa report" className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-1.5 disabled:opacity-50 ${th.card}`}><Printer size={14} />Stampa report</button>
               </div>
             </div>
           </Card>
@@ -602,16 +632,16 @@ export default function AnalizzatoreAzionario() {
             )}
             {n && (
               <div className="mt-3 space-y-2">
-                <div className="text-sm font-medium">Sentiment Tripartito (Alpha Vantage, NLP/FinBERT su notizie, SEC EDGAR Loughran-McDonald)</div>
+                <div className="text-sm font-medium">Notizie recenti</div>
                 {n.officialSentiment && (
                   <div className={`p-2 rounded-lg border text-xs mb-2 ${th.card}`}>
-                    <span className="font-semibold text-emerald-500">Tono Comunicazione Ufficiale (SEC EDGAR / Loughran-McDonald):</span> {n.officialSentiment}
+                    <span className="font-semibold text-emerald-500">Tono complessivo delle notizie:</span> {n.officialSentiment}
                   </div>
                 )}
                 {(n.items || []).map((it, i) => (
                   <div key={i} className={`rounded-lg border p-2 text-sm ${th.card}`}>
                     <div className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${it.sentiment === "pos" ? "bg-emerald-500" : it.sentiment === "neg" ? "bg-red-500" : "bg-amber-500"}`} /><span className="font-medium flex-1">{it.title}</span></div>
-                    <div className={`text-xs mt-0.5 ${th.mute}`}>{it.date} · {it.source} — {it.summary}</div>
+                    <div className={`text-xs mt-0.5 ${th.mute}`}>{[it.date, it.source].filter(Boolean).join(" · ")}{it.summary ? " — " + it.summary : ""}</div>
                   </div>
                 ))}
               </div>
@@ -649,7 +679,7 @@ export default function AnalizzatoreAzionario() {
                   <div className="grid grid-cols-3 gap-2 mt-3 text-sm"><Stat k="Ingresso" v={fi.entry || "n.d."} c="text-blue-500" /><Stat k="Stop" v={fi.stop || "n.d."} c="text-red-500" /><Stat k="Target" v={fi.target || "n.d."} c="text-emerald-500" /></div>
                 </>
               ) : (
-                <div className="text-sm flex items-center gap-3"><span className={th.mute}>Motivazione non disponibile (errore API).</span><button onClick={() => run(cur)} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white">Riprova</button></div>
+                <div className="text-sm flex items-center gap-3"><span className={th.mute}>Motivazione non disponibile (errore API).</span><button onClick={() => run(cur, true)} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white">Riprova</button></div>
               )}
               {n?.risks?.length > 0 && <div className={`text-xs mt-3 ${th.mute}`}>Rischi segnalati dalle fonti: {n.risks.join(" · ")}</div>}
             </Card>
