@@ -65,9 +65,26 @@ export function buildReportHtml({ data, tech, S, label, warns = [] }) {
 
   const up = isNum(a.targetMean) && isNum(q.price) && q.price ? (a.targetMean / q.price - 1) * 100 : null;
   const rt = a.ratings || { buy: 0, hold: 0, sell: 0 };
-  const analysts = isNum(a.targetMean) || (a.nAnalysts || 0) > 0
-    ? `<table><tbody><tr><td>Target medio</td><td class="r">${esc(nf(a.targetMean))} ${esc(q.currency || "")}</td></tr><tr><td>Target min / max</td><td class="r">${esc(nf(a.targetMin))} / ${esc(nf(a.targetMax))}</td></tr><tr><td>Potenziale rispetto al prezzo</td><td class="r">${esc(pf(up))}</td></tr><tr><td>Rating (acquisto / mantenere / vendita)</td><td class="r">${rt.buy} / ${rt.hold} / ${rt.sell}</td></tr></tbody></table>`
-    : `<p class="mute">Dati degli analisti non disponibili per questo titolo.</p>`;
+  const hasRatings = rt.buy + rt.hold + rt.sell > 0;
+  const arows = [];
+  if (isNum(a.targetMean)) {
+    arows.push(["Target medio", `${nf(a.targetMean)} ${q.currency || ""}`.trim()]);
+    if (isNum(a.targetMin) || isNum(a.targetMax)) arows.push(["Target min / max", `${nf(a.targetMin)} / ${nf(a.targetMax)}`]);
+    arows.push(["Potenziale rispetto al prezzo", pf(up)]);
+  }
+  if (hasRatings) arows.push(["Rating (acquisto / mantenere / vendita)", `${rt.buy} / ${rt.hold} / ${rt.sell}`]);
+  const analysts = arows.length
+    ? `<h3>Consenso degli analisti${a.source && a.source !== "n.d." ? ` <span class="mute">(${esc(a.source)})</span>` : ""}</h3>${table(["Voce", "Valore"], arows)}`
+    : `<p class="mute">Consenso degli analisti (target price e rating) non disponibile per questo titolo: le fonti gratuite lo coprono solo per i titoli USA.</p>`;
+
+  const mk = data.mkt;
+  const rsRows = mk && mk.stock ? [["3 mesi", "r13"], ["6 mesi", "r26"], ["12 mesi", "r52"]].filter(([, k]) => isNum(mk.stock[k])).map(([lab, k]) => {
+    const ix = mk.index && isNum(mk.index[k]) ? mk.index[k] : null;
+    return [lab, pf(mk.stock[k]), ix != null ? pf(ix) : "n.d.", ix != null ? (mk.stock[k] - ix >= 0 ? "+" : "") + nf(mk.stock[k] - ix, 1) + " pt" : "n.d."];
+  }) : [];
+  const strength = rsRows.length
+    ? `<h3>Forza relativa e momentum${mk.bench ? ` <span class="mute">(contro ${esc(mk.bench.name)})</span>` : ""}</h3>${table(["Periodo", "Titolo", "Indice", "Differenza"], rsRows)}${isNum(mk.pos52) ? `<p class="mute">Posizione nel range a 52 settimane: ${mk.pos52}% (0% = minimo, 100% = massimo).</p>` : ""}`
+    : "";
 
   const dot = { pos: "#047857", neg: "#b91c1c", neu: "#b45309" };
   const news = (n.items || []).map((it) => `<li><span style="color:${dot[it.sentiment] || dot.neu}">&#9679;</span> ${esc(it.title)} <span class="mute">(${esc([it.date, it.source].filter(Boolean).join(" · "))})</span></li>`).join("");
@@ -106,7 +123,7 @@ ul { margin: 2px 0 0; padding-left: 16px; } li { margin: 1px 0; }
 <section><h2>Prezzo e analisi tecnica</h2>${priceChartSvg(tech)}${table(["Indicatore", "Valore"], tr)}</section>
 <section><h2>Bilanci</h2>${annual}${quarters ? `<div style="height:6px"></div>${quarters}` : ""}<div style="height:6px"></div>${table(["Solidità finanziaria", "Valore"], balance)}</section>
 <section><h2>Valutazione</h2>${val || '<p class="mute">Multipli non disponibili.</p>'}</section>
-<section><h2>Analisti</h2>${analysts}</section>
+<section><h2>Sentiment di mercato</h2>${analysts}${strength}</section>
 <section><h2>Notizie recenti</h2>${n.officialSentiment ? `<p><b>Tono complessivo:</b> ${esc(n.officialSentiment)}</p>` : ""}${news ? `<ul>${news}</ul>` : '<p class="mute">Nessuna notizia disponibile.</p>'}${n.risks && n.risks.length ? `<p class="mute">Rischi segnalati dalle notizie: ${esc(n.risks.join(" · "))}</p>` : ""}</section>
 <section><h2>Giudizio</h2>${verdict}</section>
 <div class="foot">${warns.length ? `Note sui dati: ${esc(warns.join(" | "))}<br>` : ""}Analisi informativa e automatizzata, non è consulenza finanziaria. I dati possono contenere errori: verificarli su fonti ufficiali prima di qualsiasi decisione. Dati da Yahoo Finance${a.source && /Finnhub/.test(a.source) ? " e Finnhub" : ""}; commento generato da un modello di intelligenza artificiale.</div>

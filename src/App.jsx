@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { ComposedChart, LineChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell } from "recharts";
-import { loadQuote, loadFundamentals, loadAnalysts, loadNewsRaw, diagnostics } from "./data.js";
+import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, diagnostics } from "./data.js";
 import { printReport } from "./report.js";
 import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key, Printer } from "lucide-react";
 
@@ -116,10 +116,10 @@ function rsi(a, n = 14) {
   return out;
 }
 
-const STEPS = ["Quotazioni e storico…", "Bilanci e multipli…", "Rating degli analisti…", "Notizie e giudizio…"];
+const STEPS = ["Quotazioni e storico…", "Bilanci e multipli…", "Analisti e confronto con l'indice…", "Notizie e giudizio…"];
 const WEIGHTS = { "Trend tecnico": 0.2, Crescita: 0.2, Redditività: 0.15, "Solidità finanziaria": 0.15, Valutazione: 0.15, Sentiment: 0.15 };
 
-function buildTech(q) {
+export function buildTech(q) {
   const h = (q?.history || []).filter((r) => Array.isArray(r) && num(r[1]) != null);
   const closes = h.map((r) => r[1]);
   const s10 = sma(closes, 10), s40 = sma(closes, 40), r = rsi(closes), e12 = ema(closes, 12), e26 = ema(closes, 26);
@@ -128,7 +128,7 @@ function buildTech(q) {
   return rows.slice(-52);
 }
 
-function computeScores(D, tech) {
+export function computeScores(D, tech) {
   const q = D.quote, f = D.fin, v = D.val, a = D.an;
   const last = tech[tech.length - 1];
   const s50 = num(q?.sma50) ?? last?.s50, s200 = num(q?.sma200) ?? last?.s200, p = num(q?.price);
@@ -146,7 +146,15 @@ function computeScores(D, tech) {
   const vS = avg((v?.metrics || []).filter((m) => ["P/E", "P/E forward", "PEG", "P/B", "EV/EBITDA", "P/FCF"].includes(m.k) && num(m.v) != null && num(m.sector) > 0).map((m) => sc(1.5 - m.v / m.sector, 0, 1)));
   const up = a && p && num(a.targetMean) ? (a.targetMean / p - 1) * 100 : null;
   const tot = a?.ratings ? a.ratings.buy + a.ratings.hold + a.ratings.sell : 0;
-  const seS = avg([sc(up, -10, 25), tot ? sc(a.ratings.buy / tot, 0.2, 0.8) : null]);
+  const m = D.mkt;
+  let rsS = null, rsEx = null;
+  if (m?.stock) {
+    if (m.index && num(m.stock.r26) != null && num(m.index.r26) != null && num(m.stock.r52) != null && num(m.index.r52) != null) {
+      rsEx = m.stock.r52 - m.index.r52;
+      rsS = avg([sc(m.stock.r26 - m.index.r26, -15, 15), sc(rsEx, -20, 20)]);
+    } else rsS = avg([sc(m.stock.r26, -15, 35), sc(m.stock.r52, -20, 50)]);   // senza indice: momentum assoluto
+  }
+  const seS = avg([sc(up, -10, 25), tot ? sc(a.ratings.buy / tot, 0.2, 0.8) : null, rsS]);
   const scores = { "Trend tecnico": tS, Crescita: gS, Redditività: rS, "Solidità finanziaria": sS, Valutazione: vS, Sentiment: seS };
   let wsum = 0, tot2 = 0;
   Object.entries(scores).forEach(([k, s]) => { if (s != null) { wsum += WEIGHTS[k]; tot2 += s * WEIGHTS[k]; } });
@@ -154,7 +162,7 @@ function computeScores(D, tech) {
   let rel = (Object.values(scores).filter((x) => x != null).length / 6) * 100;
   const stale = daysOld(q?.asOf) > 2 || f?.isLatest === false;
   if (stale) rel -= 15;
-  return { scores, overall, rel: Math.max(0, Math.round(rel)), derived: { cagr, epsG, nm, om, nde, up } };
+  return { scores, overall, rel: Math.max(0, Math.round(rel)), derived: { cagr, epsG, nm, om, nde, up, rsEx } };
 }
 const labelOf = (s) => (s == null ? "n.d." : s >= 75 ? "COMPRARE" : s >= 62 ? "ACCUMULARE" : s >= 45 ? "MANTENERE" : s >= 32 ? "EVITARE" : "VENDERE");
 const LABEL_COLOR = { COMPRARE: "bg-emerald-700", ACCUMULARE: "bg-lime-700", MANTENERE: "bg-amber-400 !text-slate-900", EVITARE: "bg-orange-700", VENDERE: "bg-red-700", "n.d.": "bg-slate-600" };
@@ -192,6 +200,7 @@ function buildUserPrompt(acc, S, label) {
     bilancio: f.balance,
     multipli: (v.metrics || []).map((m) => `${m.k} ${m.v}${m.sector != null ? ` (settore ${m.sector})` : ""}`),
     analisti: a.nAnalysts || a.targetMean ? { tgt: a.targetMean, min: a.targetMin, max: a.targetMax, ...a.ratings } : undefined,
+    mercato: acc.mkt ? { indice: acc.mkt.bench?.name, titolo: acc.mkt.stock, rispettoIndice: acc.mkt.index, posizione52sett: acc.mkt.pos52 } : undefined,
     indicatori: S.derived,
     notizie: (acc.newsRaw || []).map((r, i) => `${i}|${r.date}|${r.title}`),
   };
@@ -239,9 +248,10 @@ export default function AnalizzatoreAzionario() {
   const [warns, setWarns] = useState([]);
   const [cachedAt, setCachedAt] = useState(null);
   const [fhVal, setFhVal] = useState(() => { try { return localStorage.getItem("finnhub_key") || ""; } catch (e) { return ""; } });
+  const [avVal, setAvVal] = useState(() => { try { return localStorage.getItem("av_key") || ""; } catch (e) { return ""; } });
   const [diag, setDiag] = useState(null);
   const [diagBusy, setDiagBusy] = useState(false);
-  const runDiag = async () => { setDiagBusy(true); setDiag(null); try { setDiag(await diagnostics(fhVal.trim())); } catch (e) { setDiag([{ name: "Diagnostica", ok: false, detail: e.message }]); } setDiagBusy(false); };
+  const runDiag = async () => { setDiagBusy(true); setDiag(null); try { setDiag(await diagnostics(fhVal.trim(), avVal.trim())); } catch (e) { setDiag([{ name: "Diagnostica", ok: false, detail: e.message }]); } setDiagBusy(false); };
   const [modelVal, setModelVal] = useState(() => { try { return localStorage.getItem("gemini_model") || "gemini-3.5-flash-lite"; } catch (e) { return "gemini-3.5-flash-lite"; } });
   const [testMsg, setTestMsg] = useState("");
   const [models, setModels] = useState([]);
@@ -292,7 +302,8 @@ export default function AnalizzatoreAzionario() {
     const w = [];
     setWarns([]);
     let fhKey = "";
-    try { fhKey = (localStorage.getItem("finnhub_key") || "").trim(); } catch (e) {}
+    let avKey = "";
+    try { fhKey = (localStorage.getItem("finnhub_key") || "").trim(); avKey = (localStorage.getItem("av_key") || "").trim(); } catch (e) {}
     const soft = async (fn, empty, label) => {
       try { return await fn(); } catch (e) { w.push(`${label}: dati non disponibili (${e.message.slice(0, 80)})`); setWarns([...w]); return empty; }
     };
@@ -309,9 +320,13 @@ export default function AnalizzatoreAzionario() {
         if (acc.val.marketCap && !acc.quote.marketCap) acc.quote = { ...acc.quote, marketCap: acc.val.marketCap };
         setData({ ...acc });
       }
-      if (!acc.an) {
+      if (!acc.an || acc.mkt === undefined) {
         setStep(2);
-        acc.an = await soft(() => loadAnalysts(sym, fhKey), EMPTY_AN(), "Analisti");
+        const [an, mkt] = await Promise.all([
+          acc.an ? acc.an : soft(() => loadAnalysts(sym, fhKey, avKey), EMPTY_AN(), "Analisti"),
+          acc.mkt !== undefined ? acc.mkt : soft(() => loadMarket(sym, acc.quote.history), null, "Confronto con l'indice"),
+        ]);
+        acc.an = an; acc.mkt = mkt;
         setData({ ...acc });
       }
       setStep(3);
@@ -349,7 +364,7 @@ export default function AnalizzatoreAzionario() {
 
   const tech = useMemo(() => buildTech(data.quote), [data.quote]);
   const S = useMemo(() => (data.quote ? computeScores(data, tech) : null), [data, tech]);
-  const q = data.quote, f = data.fin, v = data.val, a = data.an, n = data.news, fi = data.final;
+  const q = data.quote, f = data.fin, v = data.val, a = data.an, n = data.news, fi = data.final, mkt = data.mkt;
   const up = (x) => x != null && x >= 0;
 
   const Card = ({ title, children, meta }) => (
@@ -423,11 +438,14 @@ export default function AnalizzatoreAzionario() {
             <div className="font-medium pt-1">Chiave Finnhub (facoltativa)</div>
             <div className={`text-xs ${th.mute}`}>Per rating, target price e peer dei titoli USA. Gratis su finnhub.io/register</div>
             <input type="password" value={fhVal} onChange={(e) => setFhVal(e.target.value)} placeholder="Finnhub API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
+            <div className="font-medium pt-1">Chiave Alpha Vantage (facoltativa)</div>
+            <div className={`text-xs ${th.mute}`}>Aggiunge target price e rating per i titoli USA (25 richieste al giorno). Gratis su alphavantage.co/support/#api-key</div>
+            <input type="password" value={avVal} onChange={(e) => setAvVal(e.target.value)} placeholder="Alpha Vantage API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="font-medium pt-1">Modello</div>
             <input type="text" value={modelVal} onChange={(e) => setModelVal(e.target.value)} className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="flex gap-2">
               <button disabled={testing} onClick={testKey} className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>Testa chiave</button>
-              <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); localStorage.setItem("gemini_model", modelVal.trim() || "gemini-3.5-flash-lite"); localStorage.setItem("finnhub_key", fhVal.trim()); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium">Salva</button>
+              <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); localStorage.setItem("gemini_model", modelVal.trim() || "gemini-3.5-flash-lite"); localStorage.setItem("finnhub_key", fhVal.trim()); localStorage.setItem("av_key", avVal.trim()); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium">Salva</button>
             </div>
             <button disabled={diagBusy} onClick={runDiag} className={`w-full px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>{diagBusy ? "Test dati in corso…" : "Testa fonti dati"}</button>
             {diag && (
@@ -609,24 +627,47 @@ export default function AnalizzatoreAzionario() {
           </Card>
         )}
 
-        {(a || n) && (
-          <Card title="Sentiment" meta={<Meta d={a?.asOf || n?.asOf} src={a?.source || n?.source} />}>
-            {a && (
+        {(a || n || mkt) && (() => {
+          const hasTarget = num(a?.targetMean) != null;
+          const hasRatings = !!pctRatings && pctRatings.buy + pctRatings.hold + pctRatings.sell > 0;
+          const srcLabel = [a && a.source && a.source !== "n.d." ? a.source : null, mkt ? "Yahoo Finance" + (mkt.bench ? " (indice " + mkt.bench.name + ")" : "") : null].filter(Boolean).join(" · ") || n?.source;
+          const mk = mkt?.stock;
+          const rsData = mk ? [["3 mesi", "r13"], ["6 mesi", "r26"], ["12 mesi", "r52"]].map(([k, key]) => ({ k, Titolo: num(mk[key]), ...(mkt.index ? { [mkt.bench.name]: num(mkt.index[key]) } : {}) })).filter((r) => r.Titolo != null) : [];
+          return (
+          <Card title="Sentiment di mercato" meta={<Meta d={a?.asOf || n?.asOf} src={srcLabel} />}>
+            {(hasTarget || hasRatings) ? (
               <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <div className="grid grid-cols-4 gap-2 text-sm mb-2"><Stat k="Prezzo" v={nf(p)} /><Stat k="Target medio" v={nf(a.targetMean)} c={S?.derived.up != null ? (S.derived.up >= 0 ? "text-emerald-500" : "text-red-500") : ""} /><Stat k="Min" v={nf(a.targetMin)} /><Stat k="Max" v={nf(a.targetMax)} /></div>
-                  <SafeChart height={150}>
-                    <ResponsiveContainer><BarChart data={[{ k: "Prezzo", v: p }, { k: "Min", v: num(a.targetMin) }, { k: "Medio", v: num(a.targetMean) }, { k: "Max", v: num(a.targetMax) }]}><XAxis dataKey="k" {...ax} /><YAxis {...ax} width={38} /><Tooltip {...tip} formatter={(x) => nf(x)} /><Bar dataKey="v">{[C.blue, C.red, C.amber, C.green].map((c, i) => <Cell key={i} fill={c} />)}</Bar></BarChart></ResponsiveContainer>
-                  </SafeChart>
-                  <div className={`text-xs ${th.mute}`}>Upside verso target medio: <span className={cfColor(S?.derived.up)}>{pf(S?.derived.up)}</span> · analisti: {a.nAnalysts ?? "n.d."}</div>
-                </div>
-                <div>
-                  <div className="text-sm font-medium mb-1">Distribuzione rating</div>
-                  {pctRatings ? (
+                {hasTarget && (
+                  <div>
+                    <div className="grid grid-cols-4 gap-2 text-sm mb-2"><Stat k="Prezzo" v={nf(p)} /><Stat k="Target medio" v={nf(a.targetMean)} c={S?.derived.up != null ? (S.derived.up >= 0 ? "text-emerald-500" : "text-red-500") : ""} />{num(a.targetMin) != null && <Stat k="Min" v={nf(a.targetMin)} />}{num(a.targetMax) != null && <Stat k="Max" v={nf(a.targetMax)} />}</div>
+                    <SafeChart height={150}>
+                      <ResponsiveContainer><BarChart data={[{ k: "Prezzo", v: p }, ...(num(a.targetMin) != null ? [{ k: "Min", v: num(a.targetMin) }] : []), { k: "Medio", v: num(a.targetMean) }, ...(num(a.targetMax) != null ? [{ k: "Max", v: num(a.targetMax) }] : [])]}><XAxis dataKey="k" {...ax} /><YAxis {...ax} width={38} /><Tooltip {...tip} formatter={(x) => nf(x)} /><Bar dataKey="v">{[C.blue, C.red, C.amber, C.green].map((c, i) => <Cell key={i} fill={c} />)}</Bar></BarChart></ResponsiveContainer>
+                    </SafeChart>
+                    <div className={`text-xs ${th.mute}`}>Upside verso target medio: <span className={cfColor(S?.derived.up)}>{pf(S?.derived.up)}</span>{a.nAnalysts ? ` · analisti: ${a.nAnalysts}` : ""}</div>
+                  </div>
+                )}
+                {hasRatings && (
+                  <div>
+                    <div className="text-sm font-medium mb-1">Distribuzione rating</div>
                     <SafeChart height={150}>
                       <ResponsiveContainer><BarChart data={[{ k: "Buy", v: pctRatings.buy }, { k: "Hold", v: pctRatings.hold }, { k: "Sell", v: pctRatings.sell }]}><XAxis dataKey="k" {...ax} /><YAxis {...ax} width={26} allowDecimals={false} /><Tooltip {...tip} /><Bar dataKey="v" name="Analisti">{[C.green, C.amber, C.red].map((c, i) => <Cell key={i} fill={c} />)}</Bar></BarChart></ResponsiveContainer>
                     </SafeChart>
-                  ) : <div className={th.mute}>n.d.</div>}
+                    <div className={`text-xs ${th.mute}`}>Analisti: {a.nAnalysts}</div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className={`text-xs mb-1 ${th.mute}`}>Consenso degli analisti (target price e rating) non disponibile per questo titolo: le fonti gratuite lo coprono solo per i titoli USA e con la chiave Finnhub o Alpha Vantage. Il punteggio si basa sulla forza relativa.</div>
+            )}
+            {rsData.length > 0 && (
+              <div className="mt-3">
+                <div className="text-sm font-medium mb-1">Forza relativa e momentum{mkt.bench ? ` (titolo contro ${mkt.bench.name})` : ""}</div>
+                <SafeChart height={160}>
+                  <ResponsiveContainer><BarChart data={rsData}><CartesianGrid strokeDasharray="3 3" stroke={th.grid} /><XAxis dataKey="k" {...ax} /><YAxis {...ax} width={38} unit="%" /><Tooltip {...tip} formatter={(x) => pf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFmt} /><Bar dataKey="Titolo" fill={C.blue} />{mkt.index && <Bar dataKey={mkt.bench.name} fill={C.gray} />}</BarChart></ResponsiveContainer>
+                </SafeChart>
+                <div className={`text-xs ${th.mute}`}>
+                  {S?.derived.rsEx != null && <span>Rispetto all'indice su 12 mesi: <span className={cfColor(S.derived.rsEx)}>{(S.derived.rsEx >= 0 ? "+" : "") + nf(S.derived.rsEx, 1)} punti</span> · </span>}
+                  {mkt.pos52 != null && <span>Posizione nel range a 52 settimane: {mkt.pos52}% (0% = minimo, 100% = massimo)</span>}
                 </div>
               </div>
             )}
@@ -647,7 +688,8 @@ export default function AnalizzatoreAzionario() {
               </div>
             )}
           </Card>
-        )}
+          );
+        })()}
 
         {S && step === STEPS.length && (
           <>

@@ -14,7 +14,7 @@ async function defaultGet(url, headers = {}) {
   });
   let data = res.data;
   if (typeof data === "string") { try { data = JSON.parse(data); } catch (e) { /* resta stringa */ } }
-  return { status: res.status, data };
+  return { status: res.status, data, headers: res.headers || {} };
 }
 
 let httpGet = defaultGet;
@@ -25,12 +25,12 @@ const round = (x, d = 2) => (num(x) == null ? null : Math.round(x * 10 ** d) / 1
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- Yahoo ----------
-async function yget(path, params) {
+async function yget(path, params, headers = {}) {
   const qs = new URLSearchParams(params).toString();
   let last = null, lastErr = null;
   for (const host of ["query1", "query2"]) {
     try {
-      const r = await httpGet(`https://${host}.finance.yahoo.com${path}?${qs}`);
+      const r = await httpGet(`https://${host}.finance.yahoo.com${path}?${qs}`, headers);
       if (r.status === 200 || r.status === 404) return r;
       last = r;
       if (r.status === 429) await sleep(800);
@@ -232,26 +232,135 @@ export async function loadFundamentals(symbol, fhKey) {
   return { fin, val };
 }
 
-export async function loadAnalysts(symbol, fhKey) {
-  const empty = { targetMean: null, targetMin: null, targetMax: null, ratings: { buy: 0, hold: 0, sell: 0 }, nAnalysts: 0, asOf: new Date().toISOString().slice(0, 10), source: "n.d. (serve chiave Finnhub e titolo USA)" };
-  if (!fhKey || !isUS(symbol)) return empty;
-  const out = { ...empty, ratings: { ...empty.ratings }, source: "Finnhub" };
+// ---------- Analisti: Yahoo Finance (cookie + crumb), poi Finnhub come complemento ----------
+let crumbCache = null;
+export function resetYahooSession() { crumbCache = null; } // per i test
+const hdr = (h, name) => { const k = Object.keys(h || {}).find((x) => x.toLowerCase() === name); const v = k ? h[k] : ""; return Array.isArray(v) ? v.join(", ") : String(v || ""); };
+
+async function yahooCrumb(force = false) {
+  if (!force && crumbCache && Date.now() - crumbCache.ts < 20 * 60 * 1000) return crumbCache;
+  const r1 = await httpGet("https://fc.yahoo.com", {}); // risponde 404 ma imposta il cookie
+  const cookie = (hdr(r1.headers, "set-cookie").match(/\b(?:A1S|A1|A3)=[^;,\s]+/g) || []).join("; ");
+  if (!cookie) throw new Error("cookie di Yahoo non ottenuto");
+  const r2 = await httpGet("https://query1.finance.yahoo.com/v1/test/getcrumb", { Cookie: cookie });
+  const crumb = typeof r2.data === "string" ? r2.data.trim() : "";
+  if (r2.status !== 200 || !crumb || /[<\s]/.test(crumb)) throw new Error(`crumb di Yahoo non ottenuto (HTTP ${r2.status})`);
+  crumbCache = { crumb, cookie, ts: Date.now() };
+  return crumbCache;
+}
+
+const raw = (x) => (x && typeof x === "object" ? num(x.raw) : num(x));
+
+async function yahooAnalysts(symbol) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const c = await yahooCrumb(attempt > 0);
+    const r = await yget(`/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`, { modules: "financialData,recommendationTrend", crumb: c.crumb, formatted: "false", lang: "en-US", region: "US" }, { Cookie: c.cookie });
+    if (r.status === 401 || r.status === 403) { crumbCache = null; continue; }
+    if (r.status !== 200) throw new Error(`Yahoo quoteSummary HTTP ${r.status}`);
+    const res = r.data?.quoteSummary?.result?.[0] || {};
+    const fd = res.financialData || {}, t = (res.recommendationTrend?.trend || [])[0] || {};
+    const buy = (raw(t.strongBuy) || 0) + (raw(t.buy) || 0), hold = raw(t.hold) || 0, sell = (raw(t.sell) || 0) + (raw(t.strongSell) || 0);
+    return { targetMean: raw(fd.targetMeanPrice), targetMin: raw(fd.targetLowPrice), targetMax: raw(fd.targetHighPrice), nOpinions: raw(fd.numberOfAnalystOpinions), ratings: { buy, hold, sell } };
+  }
+  throw new Error("accesso a Yahoo negato (crumb non valido)");
+}
+
+async function alphaOverview(symbol, key) {
+  const r = await httpGet(`https://www.alphavantage.co/query?function=OVERVIEW&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(key)}`);
+  if (r.status !== 200 || !r.data || typeof r.data !== "object") throw new Error(`Alpha Vantage HTTP ${r.status}`);
+  if (r.data.Information || r.data.Note) throw new Error("Alpha Vantage: limite giornaliero raggiunto");
+  if (!r.data.Symbol) throw new Error("Alpha Vantage: titolo non coperto");
+  return r.data;
+}
+const avNum = (x) => { const n = Number(x); return x != null && x !== "None" && x !== "" && isFinite(n) ? n : null; };
+
+// Ordine delle fonti: 1) Yahoo (cookie + crumb: target medio/min/max e rating, anche titoli europei),
+// 2) Finnhub e 3) Alpha Vantage solo per titoli USA e solo per ciò che manca.
+export async function loadAnalysts(symbol, fhKey, avKey) {
+  const out = { targetMean: null, targetMin: null, targetMax: null, ratings: { buy: 0, hold: 0, sell: 0 }, nAnalysts: 0, asOf: new Date().toISOString().slice(0, 10), source: "n.d." };
+  const srcs = [], why = [];
+  const ratingsTot = () => out.ratings.buy + out.ratings.hold + out.ratings.sell;
+
   try {
-    const rec = await fh("/stock/recommendation", { symbol }, fhKey);
-    const r = rec?.[0];
-    if (r) {
-      out.ratings = { buy: (r.strongBuy || 0) + (r.buy || 0), hold: r.hold || 0, sell: (r.sell || 0) + (r.strongSell || 0) };
-      out.nAnalysts = out.ratings.buy + out.ratings.hold + out.ratings.sell;
-      if (r.period) out.asOf = r.period;
+    const y = await yahooAnalysts(symbol);
+    let used = false;
+    if (y.targetMean != null) { out.targetMean = y.targetMean; out.targetMin = y.targetMin; out.targetMax = y.targetMax; used = true; }
+    const tot = y.ratings.buy + y.ratings.hold + y.ratings.sell;
+    if (tot > 0) { out.ratings = y.ratings; used = true; }
+    out.nAnalysts = tot > 0 ? tot : y.nOpinions || 0;
+    if (used) srcs.push("Yahoo Finance"); else why.push("Yahoo: nessun dato per questo titolo");
+  } catch (e) { why.push("Yahoo: " + e.message.slice(0, 70)); }
+
+  if (fhKey && isUS(symbol) && (out.targetMean == null || ratingsTot() === 0)) {
+    let used = false;
+    if (ratingsTot() === 0) {
+      try {
+        const r = (await fh("/stock/recommendation", { symbol }, fhKey))?.[0];
+        if (r) {
+          out.ratings = { buy: (r.strongBuy || 0) + (r.buy || 0), hold: r.hold || 0, sell: (r.sell || 0) + (r.strongSell || 0) };
+          out.nAnalysts = ratingsTot(); if (r.period) out.asOf = r.period; used = true;
+        }
+      } catch (e) { why.push("Finnhub rating: " + e.message.slice(0, 40)); }
     }
-  } catch (e) { /* rating non disponibili */ }
-  try {
-    const pt = await fh("/stock/price-target", { symbol }, fhKey);
-    out.targetMean = num(pt?.targetMean) ?? num(pt?.targetMedian);
-    out.targetMin = num(pt?.targetLow);
-    out.targetMax = num(pt?.targetHigh);
-  } catch (e) { /* target non disponibili (può essere a pagamento) */ }
+    if (out.targetMean == null) {
+      try {
+        const pt = await fh("/stock/price-target", { symbol }, fhKey);
+        const m = num(pt?.targetMean) ?? num(pt?.targetMedian);
+        if (m != null) { out.targetMean = m; out.targetMin = num(pt?.targetLow); out.targetMax = num(pt?.targetHigh); used = true; }
+      } catch (e) { why.push("Finnhub target: " + e.message.slice(0, 40)); }   // spesso a pagamento
+    }
+    if (used) srcs.push("Finnhub");
+  }
+
+  if (avKey && isUS(symbol) && (out.targetMean == null || ratingsTot() === 0)) {
+    try {
+      const o = await alphaOverview(symbol, avKey);
+      let used = false;
+      if (out.targetMean == null && avNum(o.AnalystTargetPrice) != null) { out.targetMean = avNum(o.AnalystTargetPrice); used = true; }
+      if (ratingsTot() === 0) {
+        const c = ["AnalystRatingStrongBuy", "AnalystRatingBuy", "AnalystRatingHold", "AnalystRatingSell", "AnalystRatingStrongSell"].map((k) => avNum(o[k]) || 0);
+        const tot = c.reduce((x, y) => x + y, 0);
+        if (tot > 0) { out.ratings = { buy: c[0] + c[1], hold: c[2], sell: c[3] + c[4] }; out.nAnalysts = tot; used = true; }
+      }
+      if (used) srcs.push("Alpha Vantage");
+    } catch (e) { why.push("Alpha Vantage: " + e.message.slice(0, 50)); }
+  }
+
+  out.source = srcs.length ? srcs.join(" + ") : "n.d." + (why.length ? ` (${why.join("; ")})` : "");
   return out;
+}
+
+// ---------- Forza relativa: titolo contro indice di riferimento ----------
+const BENCH = {
+  "": ["^GSPC", "S&P 500"], ".MI": ["FTSEMIB.MI", "FTSE MIB"], ".DE": ["^GDAXI", "DAX"], ".F": ["^GDAXI", "DAX"], ".PA": ["^FCHI", "CAC 40"],
+  ".L": ["^FTSE", "FTSE 100"], ".MC": ["^IBEX", "IBEX 35"], ".AS": ["^AEX", "AEX"], ".SW": ["^SSMI", "SMI"], ".BR": ["^BFX", "BEL 20"],
+  ".T": ["^N225", "Nikkei 225"], ".HK": ["^HSI", "Hang Seng"], ".TO": ["^GSPTSE", "S&P/TSX"],
+};
+const benchFor = (symbol) => { const i = symbol.lastIndexOf("."); return BENCH[i >= 0 ? symbol.slice(i).toUpperCase() : ""] || null; };
+// rendimenti percentuali a 13/26/52 settimane da una serie di chiusure settimanali
+export function weeklyReturns(c) {
+  const n = c.length, r = (k) => (n > k && c[n - 1 - k] > 0 ? round((c[n - 1] / c[n - 1 - k] - 1) * 100, 1) : null);
+  return { r13: r(13), r26: r(26), r52: r(52) };
+}
+
+export async function loadMarket(symbol, history) {
+  const closes = (history || []).map((h) => h[1]).filter(num);
+  const stock = weeklyReturns(closes);
+  const last52 = closes.slice(-52);
+  const lo = last52.length ? Math.min(...last52) : null, hi = last52.length ? Math.max(...last52) : null;
+  const price = closes[closes.length - 1];
+  const pos52 = lo != null && hi > lo ? round(((price - lo) / (hi - lo)) * 100, 0) : null;
+  const b = benchFor(symbol);
+  let index = null;
+  if (b) {
+    try {
+      const r = await yget(`/v8/finance/chart/${encodeURIComponent(b[0])}`, { range: "2y", interval: "1wk", includePrePost: "false" });
+      const q = r.data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
+      const c = q.filter(num);
+      if (r.status === 200 && c.length > 14) index = weeklyReturns(c);
+    } catch (e) { /* indice non disponibile */ }
+  }
+  return { bench: b && index ? { symbol: b[0], name: b[1] } : null, stock, index, pos52 };
 }
 
 export async function loadNewsRaw(symbol) {
@@ -265,7 +374,7 @@ export async function loadNewsRaw(symbol) {
 }
 
 // ---------- Diagnostica ----------
-export async function diagnostics(fhKey) {
+export async function diagnostics(fhKey, avKey) {
   const out = [];
   const t = async (name, fn) => {
     try { const d = await fn(); out.push({ name, ok: true, detail: d || "OK" }); }
@@ -275,11 +384,19 @@ export async function diagnostics(fhKey) {
   await t("Yahoo: prezzi ENI.MI", async () => { const c = await chartFor("ENI.MI"); return `${c.rows.length} giorni`; });
   await t("Yahoo: bilanci e multipli AAPL", async () => { const { fin, val } = await loadFundamentals("AAPL", null); return `${fin.annual.length} anni, ${fin.quarters.length} trimestri, ${val.metrics.length} multipli`; });
   await t("Yahoo: notizie AAPL", async () => { const n = await loadNewsRaw("AAPL"); return `${n.length} notizie`; });
+  await t("Yahoo: analisti AAPL (target e rating)", async () => { const y = await yahooAnalysts("AAPL"); return y.targetMean != null ? `target medio ${round(y.targetMean)}, ${y.ratings.buy + y.ratings.hold + y.ratings.sell} rating` : "accesso ok ma target vuoti"; });
+  await t("Yahoo: analisti ENI.MI", async () => { const y = await yahooAnalysts("ENI.MI"); return y.targetMean != null ? `target medio ${round(y.targetMean)}` : "accesso ok ma target vuoti"; });
+  await t("Yahoo: indice S&P 500", async () => { const m = await loadMarket("AAPL", (await chartFor("AAPL")).rows.map((r) => [r.date, r.close])); return m.index ? `12 mesi: ${m.index.r52}%` : "indice non letto"; });
   if (fhKey) {
     await t("Finnhub: rating AAPL", async () => { const r = await fh("/stock/recommendation", { symbol: "AAPL" }, fhKey); return `${r?.length || 0} periodi`; });
     await t("Finnhub: target AAPL", async () => { const r = await fh("/stock/price-target", { symbol: "AAPL" }, fhKey); return r?.targetMean ? `media ${r.targetMean}` : "vuoto"; });
   } else {
     out.push({ name: "Finnhub", ok: false, detail: "chiave non inserita (opzionale)" });
+  }
+  if (avKey) {
+    await t("Alpha Vantage: target AAPL", async () => { const o = await alphaOverview("AAPL", avKey); return avNum(o.AnalystTargetPrice) != null ? `target medio ${o.AnalystTargetPrice}` : "titolo letto, ma senza target"; });
+  } else {
+    out.push({ name: "Alpha Vantage", ok: false, detail: "chiave non inserita (opzionale)" });
   }
   return out;
 }
