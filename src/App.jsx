@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { ComposedChart, LineChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell } from "recharts";
 import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, diagnostics } from "./data.js";
 import { printReport } from "./report.js";
@@ -236,7 +236,28 @@ function cachePut(keys, data, warns) {
 }
 
 export default function AnalizzatoreAzionario() {
-  const [dark, setDark] = useState(false);
+  const [dark, setDark] = useState(() => {
+    try { const t = localStorage.getItem("theme"); if (t === "dark" || t === "light") return t === "dark"; } catch (e) {}
+    try { return window.matchMedia("(prefers-color-scheme: dark)").matches; } catch (e) { return false; }
+  });
+  const [themeFixed, setThemeFixed] = useState(() => { try { return !!localStorage.getItem("theme"); } catch (e) { return false; } });
+  useEffect(() => {
+    if (themeFixed) return;
+    let mq; try { mq = window.matchMedia("(prefers-color-scheme: dark)"); } catch (e) { return; }
+    const h = (e) => setDark(e.matches);
+    mq.addEventListener ? mq.addEventListener("change", h) : mq.addListener(h);
+    return () => { mq.removeEventListener ? mq.removeEventListener("change", h) : mq.removeListener(h); };
+  }, [themeFixed]);
+  // Sfondo/color-scheme anche fuori dal contenitore React (aree sicure, overscroll, scrollbar, campi nativi)
+  useEffect(() => {
+    const bg = dark ? "#020617" : "#f8fafc";
+    document.documentElement.style.backgroundColor = bg;
+    document.documentElement.style.colorScheme = dark ? "dark" : "light";
+    document.body.style.backgroundColor = bg;
+    let m = document.querySelector('meta[name="theme-color"]');
+    if (!m) { m = document.createElement("meta"); m.name = "theme-color"; document.head.appendChild(m); }
+    m.content = bg;
+  }, [dark]);
   const [input, setInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [cur, setCur] = useState("");
@@ -274,7 +295,7 @@ export default function AnalizzatoreAzionario() {
   };
   const [keyVal, setKeyVal] = useState(() => { try { return localStorage.getItem("gemini_api_key") || ""; } catch (e) { return ""; } });
   const busy = step >= 0 && step < STEPS.length;
-  const th = dark ? { bg: "bg-slate-950 text-slate-100", card: "bg-slate-900 border-slate-800", mute: "text-slate-400", inp: "bg-slate-900 border-slate-700 text-slate-100", grid: "#3f4d63", txt: "#cbd5e1", dropdown: "bg-slate-900 border-slate-700 hover:bg-slate-800" } : { bg: "bg-slate-50 text-slate-900", card: "bg-white border-slate-200", mute: "text-slate-500", inp: "bg-white border-slate-300 text-slate-900", grid: "#d5dde8", txt: "#475569", dropdown: "bg-white border-slate-200 hover:bg-slate-100" };
+  const th = dark ? { bg: "bg-slate-950 text-slate-100", card: "bg-slate-900 border-slate-800", mute: "text-slate-400", inp: "bg-slate-900 border-slate-700 text-slate-100 placeholder:text-slate-400", grid: "#3f4d63", txt: "#cbd5e1", dropdown: "bg-slate-900 border-slate-700 hover:bg-slate-800" } : { bg: "bg-slate-50 text-slate-900", card: "bg-white border-slate-200", mute: "text-slate-600", inp: "bg-white border-slate-300 text-slate-900 placeholder:text-slate-500", grid: "#d5dde8", txt: "#475569", dropdown: "bg-white border-slate-200 hover:bg-slate-100" };
   const C = dark
     ? { blue: "#60a5fa", amber: "#fbbf24", red: "#f87171", green: "#34d399", purple: "#a78bfa", teal: "#2dd4bf", gray: "#94a3b8" }
     : { blue: "#2563eb", amber: "#b45309", red: "#dc2626", green: "#047857", purple: "#6d28d9", teal: "#0f766e", gray: "#64748b" };
@@ -427,7 +448,7 @@ export default function AnalizzatoreAzionario() {
           <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2"><TrendingUp className="text-emerald-500" />Analisi Finanziaria</h1>
           <div className="flex gap-2">
             <button onClick={() => setShowKey(!showKey)} className={`p-2 rounded-lg border ${th.card}`} aria-label="Chiave API"><Key size={16} /></button>
-            <button onClick={() => setDark(!dark)} className={`p-2 rounded-lg border ${th.card}`} aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
+            <button onClick={() => { const nd = !dark; setDark(nd); setThemeFixed(true); try { localStorage.setItem("theme", nd ? "dark" : "light"); } catch (e) {} }} className={`p-2 rounded-lg border ${th.card}`} aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
           </div>
         </div>
         {showKey && (
@@ -445,7 +466,7 @@ export default function AnalizzatoreAzionario() {
             <input type="text" value={modelVal} onChange={(e) => setModelVal(e.target.value)} className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="flex gap-2">
               <button disabled={testing} onClick={testKey} className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>Testa chiave</button>
-              <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); localStorage.setItem("gemini_model", modelVal.trim() || "gemini-3.5-flash-lite"); localStorage.setItem("finnhub_key", fhVal.trim()); localStorage.setItem("av_key", avVal.trim()); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium">Salva</button>
+              <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); localStorage.setItem("gemini_model", modelVal.trim() || "gemini-3.5-flash-lite"); localStorage.setItem("finnhub_key", fhVal.trim()); localStorage.setItem("av_key", avVal.trim()); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium">Salva</button>
             </div>
             <button disabled={diagBusy} onClick={runDiag} className={`w-full px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>{diagBusy ? "Test dati in corso…" : "Testa fonti dati"}</button>
             {diag && (
@@ -457,7 +478,7 @@ export default function AnalizzatoreAzionario() {
             {models.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {models.map((m) => (
-                  <button key={m} onClick={() => setModelVal(m)} className={`px-2 py-1 rounded-full border text-xs ${m === modelVal ? "bg-emerald-600 text-white border-emerald-600" : th.card}`}>{m}</button>
+                  <button key={m} onClick={() => setModelVal(m)} className={`px-2 py-1 rounded-full border text-xs ${m === modelVal ? "bg-emerald-700 text-white border-emerald-700" : th.card}`}>{m}</button>
                 ))}
               </div>
             )}
@@ -479,7 +500,7 @@ export default function AnalizzatoreAzionario() {
               placeholder="Sigla o nome (es. AAPL, ENI.MI, Ferrari…)" 
               className={`flex-1 min-w-0 px-3 py-2 rounded-lg border text-sm ${th.inp}`} 
             />
-            <button onClick={() => { setShowSuggestions(false); run(); }} disabled={busy || !input.trim()} className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"><Search size={16} />Analizza</button>
+            <button onClick={() => { setShowSuggestions(false); run(); }} disabled={busy || !input.trim()} className="px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"><Search size={16} />Analizza</button>
           </div>
           
           {showSuggestions && filteredSuggestions.length > 0 && (
@@ -612,11 +633,11 @@ export default function AnalizzatoreAzionario() {
 
                 return (
                   <tr key={m.k} className={`border-t ${th.card}`}>
-                    <td className="p-1 font-medium text-slate-900 dark:text-slate-100">{m.k}</td>
-                    <td className="text-right p-1 text-slate-900 dark:text-slate-100">{nf(m.v)}</td>
-                    <td className="text-right p-1 text-slate-900 dark:text-slate-100">{nf(m.sector)}</td>
-                    <td className="text-right p-1 text-slate-900 dark:text-slate-100">{nf(m.hist5y)}</td>
-                    <td className="text-right p-1 text-slate-900 dark:text-slate-100">{pf(diffSector)}</td>
+                    <td className="p-1 font-medium">{m.k}</td>
+                    <td className="text-right p-1">{nf(m.v)}</td>
+                    <td className="text-right p-1">{nf(m.sector)}</td>
+                    <td className="text-right p-1">{nf(m.hist5y)}</td>
+                    <td className="text-right p-1">{pf(diffSector)}</td>
                   </tr>
                 );
               })}</tbody></table></div>
@@ -721,7 +742,7 @@ export default function AnalizzatoreAzionario() {
                   <div className="grid grid-cols-3 gap-2 mt-3 text-sm"><Stat k="Ingresso" v={fi.entry || "n.d."} c="text-blue-500" /><Stat k="Stop" v={fi.stop || "n.d."} c="text-red-500" /><Stat k="Target" v={fi.target || "n.d."} c="text-emerald-500" /></div>
                 </>
               ) : (
-                <div className="text-sm flex items-center gap-3"><span className={th.mute}>Motivazione non disponibile (errore API).</span><button onClick={() => run(cur, true)} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white">Riprova</button></div>
+                <div className="text-sm flex items-center gap-3"><span className={th.mute}>Motivazione non disponibile (errore API).</span><button onClick={() => run(cur, true)} className="px-3 py-1.5 rounded-lg bg-emerald-700 text-white">Riprova</button></div>
               )}
               {n?.risks?.length > 0 && <div className={`text-xs mt-3 ${th.mute}`}>Rischi segnalati dalle fonti: {n.risks.join(" · ")}</div>}
             </Card>
