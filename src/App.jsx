@@ -472,7 +472,7 @@ export default function AnalizzatoreAzionario() {
             <button disabled={diagBusy} onClick={runDiag} className={`w-full px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>{diagBusy ? "Test dati in corso…" : "Testa fonti dati"}</button>
             {diag && (
               <div className="text-xs space-y-1">
-                {diag.map((r, i) => <div key={i} className="break-words"><span className={r.ok ? "text-emerald-500" : "text-red-500"}>{r.ok ? "✓" : "✗"}</span> {r.name}: {r.detail}</div>)}
+                {diag.map((r, i) => <div key={i} className="break-words"><span className={r.ok ? "text-emerald-500" : r.warn ? "text-amber-500" : "text-red-500"}>{r.ok ? "✓" : r.warn ? "!" : "✗"}</span> {r.name}: {r.detail}</div>)}
               </div>
             )}
             {testMsg && <div className={`text-xs break-words ${th.mute}`}>{testMsg}</div>}

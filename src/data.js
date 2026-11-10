@@ -5,9 +5,10 @@ import { CapacitorHttp } from "@capacitor/core";
 
 const UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36";
 
-async function defaultGet(url, headers = {}) {
+async function defaultGet(url, headers = {}, opts = {}) {
   const res = await CapacitorHttp.get({
     url,
+    disableRedirects: !!opts.noRedirect,
     headers: { "User-Agent": UA, Accept: "application/json,text/plain,*/*", ...headers },
     connectTimeout: 15000,
     readTimeout: 25000,
@@ -19,6 +20,12 @@ async function defaultGet(url, headers = {}) {
 
 let httpGet = defaultGet;
 export function setHttp(fn) { httpGet = fn; } // per i test
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignora */ } },
+};
+const today = () => new Date().toISOString().slice(0, 10);
 
 const num = (x) => (typeof x === "number" && isFinite(x) ? x : null);
 const round = (x, d = 2) => (num(x) == null ? null : Math.round(x * 10 ** d) / 10 ** d);
@@ -272,16 +279,43 @@ let crumbCache = null;
 export function resetYahooSession() { crumbCache = null; } // per i test
 const hdr = (h, name) => { const k = Object.keys(h || {}).find((x) => x.toLowerCase() === name); const v = k ? h[k] : ""; return Array.isArray(v) ? v.join(", ") : String(v || ""); };
 
+// Cookie Yahoo: si prova piu' di un indirizzo, SENZA seguire i redirect (altrimenti il Set-Cookie
+// della prima risposta si perde, tipico dei redirect di consenso GDPR per gli utenti europei).
+async function yahooCookie(url) {
+  const r = await httpGet(url, {}, { noRedirect: true });
+  const cookie = (hdr(r.headers, "set-cookie").match(/\b(?:A1S|A1|A3)=[^;,\s]+/g) || []).join("; ");
+  const loc = hdr(r.headers, "location");
+  let crumb = "";
+  if (typeof r.data === "string") { const m = r.data.match(/"crumb"\s*:\s*"([^"]{5,20})"/); if (m) crumb = m[1].replace(/\\u002F/g, "/"); }
+  return { cookie, crumb, note: `${new URL(url).host} HTTP ${r.status}${loc ? " -> " + loc.slice(0, 40) : ""}${cookie ? "" : ", nessun cookie"}` };
+}
+
 async function yahooCrumb(force = false) {
   if (!force && crumbCache && Date.now() - crumbCache.ts < 20 * 60 * 1000) return crumbCache;
-  const r1 = await httpGet("https://fc.yahoo.com", {}); // risponde 404 ma imposta il cookie
-  const cookie = (hdr(r1.headers, "set-cookie").match(/\b(?:A1S|A1|A3)=[^;,\s]+/g) || []).join("; ");
-  if (!cookie) throw new Error("cookie di Yahoo non ottenuto");
-  const r2 = await httpGet("https://query1.finance.yahoo.com/v1/test/getcrumb", { Cookie: cookie });
-  const crumb = typeof r2.data === "string" ? r2.data.trim() : "";
-  if (r2.status !== 200 || !crumb || /[<\s]/.test(crumb)) throw new Error(`crumb di Yahoo non ottenuto (HTTP ${r2.status})`);
-  crumbCache = { crumb, cookie, ts: Date.now() };
-  return crumbCache;
+  const notes = [];
+  const cookies = [];
+  let pageCrumb = "";
+  for (const u of ["https://fc.yahoo.com", "https://finance.yahoo.com/quote/AAPL", "https://finance.yahoo.com"]) {
+    try {
+      const c = await yahooCookie(u);
+      notes.push(c.note);
+      if (c.cookie) cookies.push(c.cookie);
+      if (c.crumb && c.cookie) pageCrumb = c.crumb;
+      if (c.cookie) break;
+    } catch (e) { notes.push(`${u.slice(8, 24)}: ${String(e.message).slice(0, 30)}`); }
+  }
+  const cookie = cookies[0] || "";
+  if (cookie && pageCrumb) { crumbCache = { crumb: pageCrumb, cookie, ts: Date.now() }; return crumbCache; }
+  // Se il cookie non e' leggibile dagli header, si prova comunque: il client HTTP nativo potrebbe averlo gia' nel suo archivio.
+  for (const host of ["query1", "query2"]) {
+    try {
+      const r2 = await httpGet(`https://${host}.finance.yahoo.com/v1/test/getcrumb`, cookie ? { Cookie: cookie } : {});
+      const crumb = typeof r2.data === "string" ? r2.data.trim() : "";
+      if (r2.status === 200 && crumb && !/[<\s]/.test(crumb)) { crumbCache = { crumb, cookie, ts: Date.now() }; return crumbCache; }
+      notes.push(`getcrumb ${host} HTTP ${r2.status}`);
+    } catch (e) { notes.push(`getcrumb ${host}: ${String(e.message).slice(0, 30)}`); }
+  }
+  throw new Error("sessione Yahoo non ottenuta (" + notes.join("; ") + ")");
 }
 
 const raw = (x) => (x && typeof x === "object" ? num(x.raw) : num(x));
@@ -289,7 +323,7 @@ const raw = (x) => (x && typeof x === "object" ? num(x.raw) : num(x));
 async function yahooAnalysts(symbol) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const c = await yahooCrumb(attempt > 0);
-    const r = await yget(`/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`, { modules: "financialData,recommendationTrend", crumb: c.crumb, formatted: "false", lang: "en-US", region: "US" }, { Cookie: c.cookie });
+    const r = await yget(`/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`, { modules: "financialData,recommendationTrend", crumb: c.crumb, formatted: "false", lang: "en-US", region: "US" }, c.cookie ? { Cookie: c.cookie } : {});
     if (r.status === 401 || r.status === 403) { crumbCache = null; continue; }
     if (r.status !== 200) throw new Error(`Yahoo quoteSummary HTTP ${r.status}`);
     const res = r.data?.quoteSummary?.result?.[0] || {};
@@ -301,10 +335,14 @@ async function yahooAnalysts(symbol) {
 }
 
 async function alphaOverview(symbol, key) {
+  const ck = "av_ov_" + symbol;
+  try { const c = JSON.parse(store.get(ck) || "null"); if (c && c.d === today()) return c.o; } catch (e) { /* cache non valida */ }
+  if (store.get("av_block") === today()) throw new Error("Alpha Vantage: limite giornaliero gia' raggiunto oggi (piano gratuito: 25 chiamate/giorno)");
   const r = await httpGet(`https://www.alphavantage.co/query?function=OVERVIEW&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(key)}`);
   if (r.status !== 200 || !r.data || typeof r.data !== "object") throw new Error(`Alpha Vantage HTTP ${r.status}`);
-  if (r.data.Information || r.data.Note) throw new Error("Alpha Vantage: limite giornaliero raggiunto");
+  if (r.data.Information || r.data.Note) { store.set("av_block", today()); throw new Error("Alpha Vantage: limite giornaliero raggiunto (25 chiamate/giorno nel piano gratuito)"); }
   if (!r.data.Symbol) throw new Error("Alpha Vantage: titolo non coperto");
+  store.set(ck, JSON.stringify({ d: today(), o: r.data }));
   return r.data;
 }
 const avNum = (x) => { const n = Number(x); return x != null && x !== "None" && x !== "" && isFinite(n) ? n : null; };
@@ -324,7 +362,7 @@ export async function loadAnalysts(symbol, fhKey, avKey) {
     if (tot > 0) { out.ratings = y.ratings; used = true; }
     out.nAnalysts = tot > 0 ? tot : y.nOpinions || 0;
     if (used) srcs.push("Yahoo Finance"); else why.push("Yahoo: nessun dato per questo titolo");
-  } catch (e) { why.push("Yahoo: " + e.message.slice(0, 70)); }
+  } catch (e) { why.push("Yahoo: " + e.message.slice(0, 220)); }
 
   if (fhKey && isUS(symbol) && (out.targetMean == null || ratingsTot() === 0)) {
     let used = false;
@@ -337,12 +375,15 @@ export async function loadAnalysts(symbol, fhKey, avKey) {
         }
       } catch (e) { why.push("Finnhub rating: " + e.message.slice(0, 40)); }
     }
-    if (out.targetMean == null) {
+    if (out.targetMean == null && store.get("fh_pt_denied") !== "1") {
       try {
         const pt = await fh("/stock/price-target", { symbol }, fhKey);
         const m = num(pt?.targetMean) ?? num(pt?.targetMedian);
         if (m != null) { out.targetMean = m; out.targetMin = num(pt?.targetLow); out.targetMax = num(pt?.targetHigh); used = true; }
-      } catch (e) { why.push("Finnhub target: " + e.message.slice(0, 40)); }   // spesso a pagamento
+      } catch (e) {
+        if (/HTTP 40[13]/.test(e.message)) store.set("fh_pt_denied", "1"); // il target non e' nel piano gratuito: non insistere
+        why.push("Finnhub target: " + e.message.slice(0, 40));
+      }
     }
     if (used) srcs.push("Finnhub");
   }
@@ -413,7 +454,11 @@ export async function diagnostics(fhKey, avKey) {
   const out = [];
   const t = async (name, fn) => {
     try { const d = await fn(); out.push({ name, ok: true, detail: d || "OK" }); }
-    catch (e) { out.push({ name, ok: false, detail: e.message.slice(0, 160) }); }
+    catch (e) {
+      const m = e.message;
+      const warn = /limite giornaliero|HTTP 403|HTTP 401/.test(m) && /Finnhub|Alpha/.test(name + m);
+      out.push({ name, ok: false, warn, detail: warn ? (/403|401/.test(m) ? "non incluso nel piano gratuito Finnhub (normale, il rating funziona)" : m.slice(0, 160) + " - riprova domani") : m.slice(0, 220) });
+    }
   };
   await t("Yahoo: prezzi AAPL", async () => { const c = await chartFor("AAPL"); return `${c.rows.length} giorni, ultimo ${c.rows[c.rows.length - 1].date}`; });
   await t("Yahoo: prezzi ENI.MI", async () => { const c = await chartFor("ENI.MI"); return `${c.rows.length} giorni`; });
@@ -424,7 +469,7 @@ export async function diagnostics(fhKey, avKey) {
   await t("Yahoo: indice S&P 500", async () => { const m = await loadMarket("AAPL", (await chartFor("AAPL")).rows.map((r) => [r.date, r.close])); return m.index ? `12 mesi: ${m.index.r52}%` : "indice non letto"; });
   if (fhKey) {
     await t("Finnhub: rating AAPL", async () => { const r = await fh("/stock/recommendation", { symbol: "AAPL" }, fhKey); return `${r?.length || 0} periodi`; });
-    await t("Finnhub: target AAPL", async () => { const r = await fh("/stock/price-target", { symbol: "AAPL" }, fhKey); return r?.targetMean ? `media ${r.targetMean}` : "vuoto"; });
+    await t("Finnhub: target AAPL", async () => { if (store.get("fh_pt_denied") === "1") return "non incluso nel piano gratuito (normale, gia' verificato)"; const r = await fh("/stock/price-target", { symbol: "AAPL" }, fhKey); return r?.targetMean ? `media ${r.targetMean}` : "vuoto"; });
   } else {
     out.push({ name: "Finnhub", ok: false, detail: "chiave non inserita (opzionale)" });
   }
