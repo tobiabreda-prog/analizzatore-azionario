@@ -143,8 +143,10 @@ export function computeScores(D, tech) {
   const rS = avg([sc(nm, 0, 25), sc(om, 0, 30), sc(b.roe, 0, 25)]);
   const nde = la && la.ebitda > 0 && num(b.netDebt) != null ? b.netDebt / la.ebitda : null;
   const sS = avg([nde != null ? sc(4 - nde, 0, 4) : null, sc(b.currentRatio, 0.8, 2), sc(b.interestCover, 1, 10)]);
-  const refOf = (m) => (num(m.sector) > 0 ? m.sector : num(m.hist5y) > 0 ? m.hist5y : null);   // settore, altrimenti storico del titolo
-  const vS = avg((v?.metrics || []).filter((m) => ["P/E", "P/E forward", "PEG", "P/B", "EV/EBITDA", "P/FCF"].includes(m.k) && num(m.v) != null && refOf(m) != null).map((m) => sc(1.5 - m.v / refOf(m), 0, 1)));
+  // Valutazione: per ogni multiplo si confronta con settore e storico 5a (media dei due se ci sono entrambi).
+  // Scala logaritmica: rapporto 1 = 50 punti, 0,4x = 100, 2,5x o piu' = 0 (prima 1,5x gia' dava 0 e i titoli "premium" restavano sempre a zero).
+  const ratioScore = (r) => (r > 0 ? clamp(50 - (50 * Math.log(r)) / Math.log(2.5)) : null);
+  const vS = avg((v?.metrics || []).filter((m) => ["P/E", "P/E forward", "PEG", "P/B", "P/S", "EV/EBITDA", "P/FCF"].includes(m.k) && num(m.v) > 0).map((m) => avg([num(m.sector) > 0 ? ratioScore(m.v / m.sector) : null, num(m.hist5y) > 0 ? ratioScore(m.v / m.hist5y) : null])));
   const up = a && p && num(a.targetMean) ? (a.targetMean / p - 1) * 100 : null;
   const tot = a?.ratings ? a.ratings.buy + a.ratings.hold + a.ratings.sell : 0;
   const m = D.mkt;
