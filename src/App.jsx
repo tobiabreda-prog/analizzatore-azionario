@@ -143,7 +143,8 @@ export function computeScores(D, tech) {
   const rS = avg([sc(nm, 0, 25), sc(om, 0, 30), sc(b.roe, 0, 25)]);
   const nde = la && la.ebitda > 0 && num(b.netDebt) != null ? b.netDebt / la.ebitda : null;
   const sS = avg([nde != null ? sc(4 - nde, 0, 4) : null, sc(b.currentRatio, 0.8, 2), sc(b.interestCover, 1, 10)]);
-  const vS = avg((v?.metrics || []).filter((m) => ["P/E", "P/E forward", "PEG", "P/B", "EV/EBITDA", "P/FCF"].includes(m.k) && num(m.v) != null && num(m.sector) > 0).map((m) => sc(1.5 - m.v / m.sector, 0, 1)));
+  const refOf = (m) => (num(m.sector) > 0 ? m.sector : num(m.hist5y) > 0 ? m.hist5y : null);   // settore, altrimenti storico del titolo
+  const vS = avg((v?.metrics || []).filter((m) => ["P/E", "P/E forward", "PEG", "P/B", "EV/EBITDA", "P/FCF"].includes(m.k) && num(m.v) != null && refOf(m) != null).map((m) => sc(1.5 - m.v / refOf(m), 0, 1)));
   const up = a && p && num(a.targetMean) ? (a.targetMean / p - 1) * 100 : null;
   const tot = a?.ratings ? a.ratings.buy + a.ratings.hold + a.ratings.sell : 0;
   const m = D.mkt;
@@ -198,7 +199,7 @@ function buildUserPrompt(acc, S, label) {
     annuali: (f.annual || []).slice(-4).map((r) => ({ y: r.y, rev: r.rev, ni: r.ni, ebitda: r.ebitda, fcf: r.fcf, eps: r.eps })),
     trimestri: (f.quarters || []).slice(-4),
     bilancio: f.balance,
-    multipli: (v.metrics || []).map((m) => `${m.k} ${m.v}${m.sector != null ? ` (settore ${m.sector})` : ""}`),
+    multipli: (v.metrics || []).map((m) => `${m.k} ${m.v}${m.sector != null ? ` (settore ${m.sector})` : ""}${m.hist5y != null ? ` (storico 5a ${m.hist5y})` : ""}`),
     analisti: a.nAnalysts || a.targetMean ? { tgt: a.targetMean, min: a.targetMin, max: a.targetMax, ...a.ratings } : undefined,
     mercato: acc.mkt ? { indice: acc.mkt.bench?.name, titolo: acc.mkt.stock, rispettoIndice: acc.mkt.index, posizione52sett: acc.mkt.pos52 } : undefined,
     indicatori: S.derived,
@@ -627,9 +628,11 @@ export default function AnalizzatoreAzionario() {
 
         {v && (
           <Card title="Valutazione" meta={<Meta d={v.asOf} src={v.source} />}>
-            <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className={`text-xs ${th.mute}`}><th className="text-left p-1">Multiplo</th><th className="text-right p-1">Attuale</th><th className="text-right p-1">Settore</th><th className="text-right p-1">Storico 5a</th><th className="text-right p-1">vs settore</th></tr></thead>
+            <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className={`text-xs ${th.mute}`}><th className="text-left p-1">Multiplo</th><th className="text-right p-1">Attuale</th><th className="text-right p-1">Settore</th><th className="text-right p-1">Storico 5a</th><th className="text-right p-1">Scostam.</th></tr></thead>
               <tbody>{valMetrics.map((m) => {
-                const diffSector = num(m.v) != null && num(m.sector) > 0 ? (m.v / m.sector - 1) * 100 : null;
+                const useSector = num(m.sector) > 0;
+                const refV = useSector ? m.sector : num(m.hist5y) > 0 ? m.hist5y : null;
+                const diffSector = num(m.v) != null && refV != null ? (m.v / refV - 1) * 100 : null;
 
                 return (
                   <tr key={m.k} className={`border-t ${th.card}`}>
@@ -637,13 +640,14 @@ export default function AnalizzatoreAzionario() {
                     <td className="text-right p-1">{nf(m.v)}</td>
                     <td className="text-right p-1">{nf(m.sector)}</td>
                     <td className="text-right p-1">{nf(m.hist5y)}</td>
-                    <td className="text-right p-1">{pf(diffSector)}</td>
+                    <td className="text-right p-1">{pf(diffSector)}{diffSector != null && <div className={`text-[10px] ${th.mute}`}>{useSector ? "sett." : "stor."}</div>}</td>
                   </tr>
                 );
               })}</tbody></table></div>
             <SafeChart height={210}>
               <div className="mt-3"><ResponsiveContainer><BarChart data={valMetrics.filter((m) => !m.k.includes("%"))}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="k" {...ax} /><YAxis {...ax} width={32} /><Tooltip {...tip} formatter={(x) => nf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFmt} /><Bar dataKey="v" name="Titolo" fill={C.blue} /><Bar dataKey="sector" name="Settore" fill={C.gray} /><Bar dataKey="hist5y" name="Storico 5a" fill={C.amber} /></BarChart></ResponsiveContainer></div>
             </SafeChart>
+            <div className={`text-xs mt-2 ${th.mute}`}>Settore = mediana di titoli simili{(v.peers || []).length ? ` (${v.peers.length})` : " (non disponibile)"}. Storico = mediana dei valori trimestrali{v.histYears ? ` degli ultimi ${nf(v.histYears, 1)} anni` : " (non disponibile)"}. Scostamento: contro il settore, in mancanza contro lo storico.</div>
             {(v.peers || []).length > 0 && <div className={`text-xs mt-2 ${th.mute}`}>Concorrenti: {v.peers.map((c) => `${c.name} (P/E ${nf(c.pe, 1)}, EV/EBITDA ${nf(c.evEbitda, 1)})`).join(" · ")}</div>}
           </Card>
         )}

@@ -61,7 +61,7 @@ export function buildReportHtml({ data, tech, S, label, warns = [] }) {
   const quarters = table(["Trimestre", "Ricavi (mln)", "Utile netto", "EPS"], (f.quarters || []).map((r) => [r.p, mf(r.rev), mf(r.ni), nf(r.eps)]));
   const b = f.balance || {};
   const balance = [["Debito netto (mln)", mf(b.netDebt)], ["Debito totale (mln)", mf(b.totalDebt)], ["Patrimonio netto (mln)", mf(b.equity)], ["Current ratio", nf(b.currentRatio)], ["Copertura interessi", nf(b.interestCover, 1)], ["ROE", isNum(b.roe) ? nf(b.roe, 1) + "%" : "n.d."]];
-  const val = table(["Multiplo", "Titolo", "Settore"], (v.metrics || []).map((m) => [m.k, nf(m.v), isNum(m.sector) ? nf(m.sector) : "n.d."]));
+  const val = table(["Multiplo", "Titolo", "Settore", "Storico 5a"], (v.metrics || []).map((m) => [m.k, nf(m.v), isNum(m.sector) ? nf(m.sector) : "n.d.", isNum(m.hist5y) ? nf(m.hist5y) : "n.d."]));
 
   const up = isNum(a.targetMean) && isNum(q.price) && q.price ? (a.targetMean / q.price - 1) * 100 : null;
   const rt = a.ratings || { buy: 0, hold: 0, sell: 0 };

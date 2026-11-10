@@ -207,21 +207,56 @@ async function fh(path, params, key) {
 }
 const isUS = (sym) => !/[.:]/.test(sym);
 
-async function buildVal(s, symbol, fhKey) {
-  const own = {};
-  Object.entries(VAL_TYPES).forEach(([k, t]) => { own[k] = round(lastVal(s, t), 2); });
-  let peers = [], sector = {};
+// Storico: mediana dei valori trimestrali degli ultimi 5 anni, ricavata dalle serie gia' scaricate (nessuna chiamata in piu').
+function histMedian(series) {
+  const lim = Date.now() - 5 * 366 * 864e5;
+  const pts = (series || []).filter((e) => Date.parse(e.d) >= lim && e.v > 0);
+  if (pts.length < 4) return null;
+  return { v: median(pts.map((e) => e.v)), span: (Date.parse(pts[pts.length - 1].d) - Date.parse(pts[0].d)) / (365 * 864e5) };
+}
+
+// Titoli simili per il confronto di settore: Finnhub (USA, con chiave) oppure Yahoo "simili" (qualsiasi mercato, senza chiave).
+async function peerSymbols(symbol, fhKey) {
   if (fhKey && isUS(symbol)) {
     try {
-      const list = (await fh("/stock/peers", { symbol }, fhKey)).filter((p) => p !== symbol && isUS(p)).slice(0, 4);
-      const res = await Promise.allSettled(list.map((p) => yseries(p, [VAL_TYPES["P/E"], VAL_TYPES["P/E forward"], VAL_TYPES["P/B"], VAL_TYPES["P/S"], VAL_TYPES["EV/EBITDA"]], 1.2)));
-      const vals = res.map((r, i) => (r.status === "fulfilled" ? { name: list[i], s: r.value } : null)).filter(Boolean);
-      peers = vals.map((p) => ({ name: p.name, pe: round(lastVal(p.s, VAL_TYPES["P/E"]), 1), evEbitda: round(lastVal(p.s, VAL_TYPES["EV/EBITDA"]), 1) }));
-      Object.entries(VAL_TYPES).forEach(([k, t]) => { sector[k] = round(median(vals.map((p) => lastVal(p.s, t))), 2); });
-    } catch (e) { /* peer non disponibili */ }
+      const list = (await fh("/stock/peers", { symbol }, fhKey)).filter((p) => p !== symbol && isUS(p)).slice(0, 5);
+      if (list.length >= 2) return { list, via: "Finnhub" };
+    } catch (e) { /* passa a Yahoo */ }
   }
-  const metrics = Object.keys(VAL_TYPES).filter((k) => own[k] != null).map((k) => ({ k, v: own[k], sector: sector[k] ?? null, hist5y: null }));
-  return { metrics, peers, marketCap: lastVal(s, "trailingMarketCap"), asOf: new Date().toISOString().slice(0, 10), source: "Yahoo Finance" + (peers.length ? " + Finnhub (peer)" : "") };
+  try {
+    const r = await yget(`/v6/finance/recommendationsbysymbol/${encodeURIComponent(symbol)}`, {});
+    const list = (r.data?.finance?.result?.[0]?.recommendedSymbols || []).map((x) => x?.symbol).filter((p) => p && p !== symbol).slice(0, 6);
+    if (r.status === 200 && list.length >= 2) return { list, via: "Yahoo" };
+  } catch (e) { /* nessun peer */ }
+  return { list: [], via: "" };
+}
+
+async function buildVal(s, symbol, fhKey) {
+  const own = {}, hist = {};
+  let spans = [];
+  Object.entries(VAL_TYPES).forEach(([k, t]) => {
+    own[k] = round(lastVal(s, t), 2);
+    const h = histMedian(s[t]);
+    if (h) { hist[k] = round(h.v, 2); spans.push(h.span); }
+  });
+  let peers = [], sector = {}, via = "";
+  try {
+    const found = await peerSymbols(symbol, fhKey);
+    via = found.via;
+    if (found.list.length) {
+      const res = await Promise.allSettled(found.list.map((p) => yseries(p, Object.values(VAL_TYPES), 1.2)));
+      const vals = res.map((r, i) => (r.status === "fulfilled" ? { name: found.list[i], s: r.value } : null)).filter(Boolean);
+      peers = vals.map((p) => ({ name: p.name, pe: round(lastVal(p.s, VAL_TYPES["P/E"]), 1), evEbitda: round(lastVal(p.s, VAL_TYPES["EV/EBITDA"]), 1) })).filter((p) => p.pe != null || p.evEbitda != null);
+      Object.entries(VAL_TYPES).forEach(([k, t]) => { sector[k] = round(median(vals.map((p) => lastVal(p.s, t))), 2); });
+    }
+  } catch (e) { /* peer non disponibili */ }
+  const metrics = Object.keys(VAL_TYPES).filter((k) => own[k] != null).map((k) => ({ k, v: own[k], sector: sector[k] ?? null, hist5y: hist[k] ?? null }));
+  return {
+    metrics, peers, marketCap: lastVal(s, "trailingMarketCap"),
+    histYears: spans.length ? round(Math.min(...spans), 1) : null,
+    asOf: new Date().toISOString().slice(0, 10),
+    source: "Yahoo Finance" + (peers.length ? ` + peer (${via})` : ""),
+  };
 }
 
 // Una sola chiamata a Yahoo per bilanci e multipli (prima erano due)
