@@ -164,7 +164,7 @@ async function yseries(symbol, types, years) {
 const lastVal = (s, k) => { const a = s?.[k]; return a?.length ? a[a.length - 1].v : null; };
 const M = (x) => (num(x) == null ? null : round(x / 1e6, 1));
 
-const ANNUAL_TYPES = ["annualTotalRevenue", "annualNetIncome", "annualEBITDA", "annualGrossProfit", "annualOperatingIncome", "annualDilutedEPS", "annualFreeCashFlow", "annualTotalDebt", "annualNetDebt", "annualStockholdersEquity", "annualCurrentAssets", "annualCurrentLiabilities", "annualInterestExpense", "annualEBIT"];
+const ANNUAL_TYPES = ["annualTotalRevenue", "annualNetIncome", "annualEBITDA", "annualGrossProfit", "annualOperatingIncome", "annualDilutedEPS", "annualFreeCashFlow", "annualTotalDebt", "annualNetDebt", "annualStockholdersEquity", "annualCurrentAssets", "annualCurrentLiabilities", "annualInterestExpense", "annualEBIT", "annualTaxRateForCalcs", "annualInvestedCapital"];
 const Q_TYPES = ["quarterlyTotalRevenue", "quarterlyNetIncome", "quarterlyDilutedEPS"];
 
 function buildFin(s) {
@@ -185,6 +185,10 @@ function buildFin(s) {
   const eq = lastVal(s, "annualStockholdersEquity"), ni = lastVal(s, "annualNetIncome");
   const ca = lastVal(s, "annualCurrentAssets"), cl = lastVal(s, "annualCurrentLiabilities");
   const ebit = lastVal(s, "annualEBIT") ?? lastVal(s, "annualOperatingIncome"), ie = lastVal(s, "annualInterestExpense");
+  // ROIC = EBIT x (1 - aliquota) / capitale investito (Yahoo; in alternativa patrimonio netto + debito totale)
+  const trate = lastVal(s, "annualTaxRateForCalcs"), tdebt = lastVal(s, "annualTotalDebt");
+  const tax = trate != null && trate >= 0 && trate <= 0.5 ? trate : 0.21;
+  const ic = lastVal(s, "annualInvestedCapital") ?? (eq != null && tdebt != null ? eq + tdebt : null);
   const lastDate = (s.annualTotalRevenue || []).slice(-1)[0]?.d || "";
   return {
     annual, quarters,
@@ -193,7 +197,7 @@ function buildFin(s) {
       currentRatio: ca != null && cl ? round(ca / cl, 2) : null,
       interestCover: ebit != null && ie ? round(ebit / Math.abs(ie), 1) : null,
       roe: ni != null && eq > 0 ? round((ni / eq) * 100, 1) : null,
-      roic: null,
+      roic: ebit != null && ic > 0 ? round((ebit * (1 - tax)) / ic * 100, 1) : null,
     },
     lastReportDate: lastDate,
     isLatest: lastDate ? (Date.now() - Date.parse(lastDate)) / 864e5 < 560 : false,
@@ -334,47 +338,15 @@ async function yahooAnalysts(symbol) {
   throw new Error("accesso a Yahoo negato (crumb non valido)");
 }
 
-// Alpha Vantage e' una fonte di ultima istanza: limite interno prudenziale sotto la quota gratuita dichiarata.
-const AV_DAILY_LIMIT = 20;
-const avDayKey = () => today();
-const avCountKey = () => "av_count_" + avDayKey();
-const avAttemptKey = (symbol) => "av_attempt_" + avDayKey() + "_" + symbol;
-function alphaUsageToday() {
-  const count = Number(store.get(avCountKey()) || 0);
-  return Number.isFinite(count) && count > 0 ? count : 0;
-}
-
 async function alphaOverview(symbol, key) {
-  const day = avDayKey();
   const ck = "av_ov_" + symbol;
-  try { const c = JSON.parse(store.get(ck) || "null"); if (c && c.d === day) return c.o; } catch (e) { /* cache non valida */ }
-
-  // Un solo tentativo per ticker/giorno, anche se la rete fallisce o la risposta non contiene dati.
-  // In questo modo i retry ripetuti non consumano la quota gratuita.
-  if (store.get(avAttemptKey(symbol)) === "1") {
-    throw new Error("Alpha Vantage: richiesta gia' effettuata oggi per questo titolo; nessun nuovo tentativo");
-  }
-  if (store.get("av_block") === day) {
-    throw new Error("Alpha Vantage: limite giornaliero segnalato dal provider; riprova domani");
-  }
-
-  const count = alphaUsageToday();
-  if (count >= AV_DAILY_LIMIT) {
-    throw new Error(`Alpha Vantage: limite prudenziale interno raggiunto (${AV_DAILY_LIMIT} richieste/giorno); riprova domani`);
-  }
-
-  // Registrare il tentativo PRIMA della chiamata evita richieste duplicate in caso di timeout.
-  store.set(avAttemptKey(symbol), "1");
-  store.set(avCountKey(), String(count + 1));
-
+  try { const c = JSON.parse(store.get(ck) || "null"); if (c && c.d === today()) return c.o; } catch (e) { /* cache non valida */ }
+  if (store.get("av_block") === today()) throw new Error("Alpha Vantage: limite giornaliero gia' raggiunto oggi (piano gratuito: 25 chiamate/giorno)");
   const r = await httpGet(`https://www.alphavantage.co/query?function=OVERVIEW&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(key)}`);
   if (r.status !== 200 || !r.data || typeof r.data !== "object") throw new Error(`Alpha Vantage HTTP ${r.status}`);
-  if (r.data.Information || r.data.Note) {
-    store.set("av_block", day);
-    throw new Error("Alpha Vantage: il provider ha segnalato un limite o una richiesta non disponibile; riprova domani");
-  }
-  if (!r.data.Symbol) throw new Error("Alpha Vantage: titolo non coperto o risposta senza dati validi");
-  store.set(ck, JSON.stringify({ d: day, o: r.data }));
+  if (r.data.Information || r.data.Note) { store.set("av_block", today()); throw new Error("Alpha Vantage: limite giornaliero raggiunto (25 chiamate/giorno nel piano gratuito)"); }
+  if (!r.data.Symbol) throw new Error("Alpha Vantage: titolo non coperto");
+  store.set(ck, JSON.stringify({ d: today(), o: r.data }));
   return r.data;
 }
 const avNum = (x) => { const n = Number(x); return x != null && x !== "None" && x !== "" && isFinite(n) ? n : null; };
@@ -506,14 +478,9 @@ export async function diagnostics(fhKey, avKey) {
     out.push({ name: "Finnhub", ok: false, detail: "chiave non inserita (opzionale)" });
   }
   if (avKey) {
-    const used = alphaUsageToday();
-    out.push({
-      name: "Alpha Vantage",
-      ok: true,
-      detail: `fallback non interrogato dalla diagnostica per preservare la quota; ${used}/${AV_DAILY_LIMIT} richieste effettuate oggi`,
-    });
+    await t("Alpha Vantage: target AAPL", async () => { const o = await alphaOverview("AAPL", avKey); return avNum(o.AnalystTargetPrice) != null ? `target medio ${o.AnalystTargetPrice}` : "titolo letto, ma senza target"; });
   } else {
-    out.push({ name: "Alpha Vantage", ok: false, detail: "chiave non inserita (opzionale); fonte di emergenza non attiva" });
+    out.push({ name: "Alpha Vantage", ok: false, detail: "chiave non inserita (opzionale)" });
   }
   return out;
 }
