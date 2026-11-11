@@ -273,9 +273,23 @@ export default function AnalizzatoreAzionario() {
   const [cachedAt, setCachedAt] = useState(null);
   const [fhVal, setFhVal] = useState(() => { try { return localStorage.getItem("finnhub_key") || ""; } catch (e) { return ""; } });
   const [avVal, setAvVal] = useState(() => { try { return localStorage.getItem("av_key") || ""; } catch (e) { return ""; } });
+  const [avUsage, setAvUsage] = useState(() => {
+    try {
+      const day = new Date().toISOString().slice(0, 10);
+      const value = Number(localStorage.getItem("av_count_" + day) || 0);
+      return Number.isFinite(value) && value > 0 ? Math.min(value, 20) : 0;
+    } catch (e) { return 0; }
+  });
+  const refreshAvUsage = () => {
+    try {
+      const day = new Date().toISOString().slice(0, 10);
+      const value = Number(localStorage.getItem("av_count_" + day) || 0);
+      setAvUsage(Number.isFinite(value) && value > 0 ? Math.min(value, 20) : 0);
+    } catch (e) { setAvUsage(0); }
+  };
   const [diag, setDiag] = useState(null);
   const [diagBusy, setDiagBusy] = useState(false);
-  const runDiag = async () => { setDiagBusy(true); setDiag(null); try { setDiag(await diagnostics(fhVal.trim(), avVal.trim())); } catch (e) { setDiag([{ name: "Diagnostica", ok: false, detail: e.message }]); } setDiagBusy(false); };
+  const runDiag = async () => { setDiagBusy(true); setDiag(null); try { setDiag(await diagnostics(fhVal.trim(), avVal.trim())); } catch (e) { setDiag([{ name: "Diagnostica", ok: false, detail: e.message }]); } refreshAvUsage(); setDiagBusy(false); };
   const [modelVal, setModelVal] = useState(() => { try { return localStorage.getItem("gemini_model") || "gemini-3.5-flash-lite"; } catch (e) { return "gemini-3.5-flash-lite"; } });
   const [testMsg, setTestMsg] = useState("");
   const [models, setModels] = useState([]);
@@ -351,6 +365,7 @@ export default function AnalizzatoreAzionario() {
           acc.mkt !== undefined ? acc.mkt : soft(() => loadMarket(sym, acc.quote.history), null, "Confronto con l'indice"),
         ]);
         acc.an = an; acc.mkt = mkt;
+        refreshAvUsage();
         setData({ ...acc });
       }
       setStep(3);
@@ -465,6 +480,14 @@ export default function AnalizzatoreAzionario() {
             <div className="font-medium pt-1">Chiave Alpha Vantage (facoltativa)</div>
             <div className={`text-xs ${th.mute}`}>Aggiunge target price e rating per i titoli USA (25 richieste al giorno). Gratis su alphavantage.co/support/#api-key</div>
             <input type="password" value={avVal} onChange={(e) => setAvVal(e.target.value)} placeholder="Alpha Vantage API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
+            <div className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs ${th.card}`}>
+              <span className={th.mute}>Consumo Alpha Vantage oggi</span>
+              <span className="font-semibold tabular-nums">{avUsage}/20 richieste</span>
+            </div>
+            <div className={`h-1.5 rounded-full overflow-hidden ${dark ? "bg-slate-800" : "bg-slate-200"}`}>
+              <div className={`h-full ${avUsage >= 20 ? "bg-red-500" : avUsage >= 15 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${Math.min(100, avUsage / 20 * 100)}%` }} />
+            </div>
+            <button type="button" onClick={refreshAvUsage} className={`text-xs underline ${th.mute}`}>Aggiorna contatore</button>
             <div className="font-medium pt-1">Modello</div>
             <input type="text" value={modelVal} onChange={(e) => setModelVal(e.target.value)} className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="flex gap-2">
