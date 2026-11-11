@@ -586,6 +586,10 @@ export default function AnalizzatoreAzionario() {
                 {(q.resistance || []).filter(num).slice(0, 2).map((x, i) => <ReferenceLine key={"r" + i} y={x} stroke={C.red} strokeDasharray="4 4" />)}
               </ComposedChart></ResponsiveContainer>
             </SafeChart>
+            <div className={`flex flex-wrap gap-x-4 gap-y-1 mt-1 text-[11px] ${th.mute}`}>
+              <span className="flex items-center gap-1.5"><span style={{ width: 18, borderTop: `2px dashed ${C.red}` }} />Resistenze: massimo 1 mese / 3 mesi</span>
+              <span className="flex items-center gap-1.5"><span style={{ width: 18, borderTop: `2px dashed ${C.green}` }} />Supporti: minimo 1 mese / 3 mesi</span>
+            </div>
             <div className="grid sm:grid-cols-3 gap-3 mt-2">
               <SafeChart height={120}><ResponsiveContainer><BarChart data={tech}><XAxis dataKey="d" hide /><YAxis {...ax} width={32} /><Tooltip {...tip} formatter={(x) => nf(x)} /><Bar dataKey="v" name="Volumi (mln)" fill={C.gray} /></BarChart></ResponsiveContainer></SafeChart>
               <SafeChart height={120}><ResponsiveContainer><LineChart data={tech}><XAxis dataKey="d" hide /><YAxis {...ax} domain={[0, 100]} width={28} /><Tooltip {...tip} formatter={(x) => nf(x, 1)} /><ReferenceLine y={70} stroke={C.red} strokeDasharray="3 3" /><ReferenceLine y={30} stroke={C.green} strokeDasharray="3 3" /><Line dataKey="rsi" name="RSI(14)" stroke={C.purple} dot={false} /></LineChart></ResponsiveContainer></SafeChart>
