@@ -3,9 +3,10 @@ import { valueScenarios } from "../modules/fair-value.js";
 
 const num=(v)=>v.trim()===""?null:Number(v);
 const pct=(v)=>Number(v)/100;
-const money=(v)=>Number.isFinite(v)?v.toLocaleString("it-IT",{maximumFractionDigits:2}):"n.d.";
+const money=(v,currency)=>{if(!Number.isFinite(v))return "n.d.";try{return currency?new Intl.NumberFormat("it-IT",{style:"currency",currency,maximumFractionDigits:2}).format(v):v.toLocaleString("it-IT",{maximumFractionDigits:2});}catch{return v.toLocaleString("it-IT",{maximumFractionDigits:2});}};
 
 export default function FairValuePanel({dark=false,analysisData=null}){
+ const currency=analysisData?.quote?.currency||"";
  const latestFcf=analysisData?.fin?.annual?.filter(x=>Number.isFinite(x.fcf)&&x.fcf>0).at(-1)?.fcf;
  const [fcfBase,setFcfBase]=useState(()=>Number.isFinite(latestFcf)?String(latestFcf):"");
  const [fcfGrowth,setFcfGrowth]=useState("5");
@@ -50,10 +51,10 @@ export default function FairValuePanel({dark=false,analysisData=null}){
   {error&&<p role="alert" className="text-sm text-red-500">{error}</p>}
   {result&&<div className="space-y-3">
    <div className="grid grid-cols-2 gap-2">
-    <div className="rounded-lg border border-emerald-500/30 p-3"><div className={`text-xs ${muted}`}>Fair value ponderato per azione</div><div className="text-2xl font-bold">{money(result.weightedFairValue)}</div></div>
+    <div className="rounded-lg border border-emerald-500/30 p-3"><div className={`text-xs ${muted}`}>Fair value ponderato per azione {currency?`(${currency})`:""}</div><div className="text-2xl font-bold">{money(result.weightedFairValue,currency)}</div></div>
     <div className="rounded-lg border p-3"><div className={`text-xs ${muted}`}>Margine di sicurezza / upside</div><div className="text-2xl font-bold">{result.marginOfSafety===null?"n.d.":(result.marginOfSafety*100).toFixed(1)+"%"}</div></div>
    </div>
-   <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left"><th className="py-2">Scenario</th><th>Probabilità</th><th>WACC</th><th>g terminale</th><th>Fair value</th></tr></thead><tbody>{result.scenarios.map(s=><tr key={s.name} className="border-b border-slate-500/20"><td className="py-2 capitalize">{s.name}</td><td>{(s.probability*100).toFixed(0)}%</td><td>{(s.wacc*100).toFixed(1)}%</td><td>{(s.terminalGrowth*100).toFixed(1)}%</td><td className="font-semibold">{money(s.valuePerShare)}</td></tr>)}</tbody></table></div>
+   <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left"><th className="py-2">Scenario</th><th>Probabilità</th><th>WACC</th><th>g terminale</th><th>Fair value</th></tr></thead><tbody>{result.scenarios.map(s=><tr key={s.name} className="border-b border-slate-500/20"><td className="py-2 capitalize">{s.name}</td><td>{(s.probability*100).toFixed(0)}%</td><td>{(s.wacc*100).toFixed(1)}%</td><td>{(s.terminalGrowth*100).toFixed(1)}%</td><td className="font-semibold">{money(s.valuePerShare,currency)}</td></tr>)}</tbody></table></div>
    <p className={`text-xs ${muted}`}>Scenari convenzionali: Bear = FCF −15%, WACC +2 punti, g −1 punto; Base = ipotesi inserite; Bull = FCF +15%, WACC −1 punto e g +0,5 punti (vincolato a WACC &gt; g). Probabilità 25/50/25. Il risultato è estremamente sensibile alle ipotesi e non è una previsione né un segnale automatico.</p>
   </div>}
  </section>;
