@@ -1,5 +1,5 @@
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
-const dateOnly = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
+const dateOnly = (v) => { if(typeof v!=="string"||!/^\d{4}-\d{2}-\d{2}$/.test(v))return false; const d=new Date(v+"T00:00:00Z"); return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===v; };
 
 export function normalizeEarningsEvent(raw) {
   if (!raw || !dateOnly(raw.date) || !raw.source) throw new Error("Evento utili: data ISO e fonte obbligatorie");
