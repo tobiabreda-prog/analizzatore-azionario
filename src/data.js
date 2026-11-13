@@ -190,7 +190,7 @@ function buildFin(s) {
   const ebit = lastVal(s, "annualEBIT") ?? lastVal(s, "annualOperatingIncome"), ie = lastVal(s, "annualInterestExpense");
   // ROIC = EBIT x (1 - aliquota) / capitale investito (Yahoo; in alternativa patrimonio netto + debito totale)
   const trate = lastVal(s, "annualTaxRateForCalcs"), tdebt = lastVal(s, "annualTotalDebt");
-  const tax = trate != null && trate >= 0 && trate <= 0.5 ? trate : 0.21;
+  const tax = trate != null && trate >= 0 && trate <= 0.5 ? trate : null;
   const ic = lastVal(s, "annualInvestedCapital") ?? (eq != null && tdebt != null ? eq + tdebt : null);
   const lastDate = (s.annualTotalRevenue || []).slice(-1)[0]?.d || "";
   return {
@@ -201,7 +201,7 @@ function buildFin(s) {
       currentRatio: ca != null && cl ? round(ca / cl, 2) : null,
       interestCover: ebit != null && ie ? round(ebit / Math.abs(ie), 1) : null,
       roe: ni != null && eq > 0 ? round((ni / eq) * 100, 1) : null,
-      roic: ebit != null && ic > 0 ? round((ebit * (1 - tax)) / ic * 100, 1) : null,
+      roic: ebit != null && ic > 0 && tax != null ? round((ebit * (1 - tax)) / ic * 100, 1) : null,
     },
     lastReportDate: lastDate,
     isLatest: lastDate ? (Date.now() - Date.parse(lastDate)) / 864e5 < 560 : false,
@@ -239,7 +239,10 @@ export async function loadPeerValuation(symbol) {
   const found=await peerSymbols(symbol);
   via=found.via;
   if(found.list.length) {
-    const res=await Promise.allSettled(found.list.map(p=>yseries(p,Object.values(VAL_TYPES),1.2)));
+    const res=[];
+    for(let i=0;i<found.list.length;i+=2){
+      res.push(...await Promise.allSettled(found.list.slice(i,i+2).map(p=>yseries(p,Object.values(VAL_TYPES),1.2))));
+    }
     const vals=res.map((r,i)=>r.status==="fulfilled"?{name:found.list[i],s:r.value}:null).filter(Boolean);
     peers=vals.map(p=>({name:p.name,pe:round(lastVal(p.s,VAL_TYPES["P/E"]),1),evEbitda:round(lastVal(p.s,VAL_TYPES["EV/EBITDA"]),1)})).filter(p=>p.pe!=null||p.evEbitda!=null);
     Object.entries(VAL_TYPES).forEach(([k,t])=>{sector[k]=round(median(vals.map(p=>lastVal(p.s,t))),2);});
