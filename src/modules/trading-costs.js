@@ -27,3 +27,8 @@ export function minimumCapitalForOrder({minNotional=MIN_INVESTMENT_NOTIONAL,fixe
   }
   return minNotional * (1 + (feeBps + buyTaxBps) / 10000) + fixedFee;
 }
+
+export function formatItalianInteger(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "n.d.";
+  return Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
