@@ -4,7 +4,7 @@ import { loadAlphaVantageDaily, getAlphaVantageUsage } from "../providers/alphav
 import { loadFredObservations } from "../providers/fred.js";
 import { loadEcbSeries } from "../providers/ecb.js";
 import { classifyMacroRegime } from "../core/macro-regime.js";
-import { buildPositions } from "../modules/portfolio.js";
+import { buildPositions, validateMinimumInvestment } from "../modules/portfolio.js";
 import { buildCorporateCalendar, normalizeDividend, normalizeEarningsEvent } from "../modules/earnings-dividends.js";
 import { parseTradeCsv, serializeTradesCsv } from "../modules/trade-csv.js";
 import { sma, ema, rsi } from "../modules/technical-indicators.js";
@@ -27,7 +27,7 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null,an
  const [quantity,setQuantity]=useState("1");
  const [price,setPrice]=useState("");
  const [currency,setCurrency]=useState("EUR");
- const [fees,setFees]=useState("12.95");
+ const [fees,setFees]=useState("19.00");
  const [portfolioTaxes,setPortfolioTaxes]=useState("0");
  const [tradeDate,setTradeDate]=useState(today());
  const [eventType,setEventType]=useState("earnings");
@@ -68,7 +68,7 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null,an
  const autoEarnings=useMemo(()=>{const e=analysisData?.events?.earnings;if(!e?.nextDate||!analysisData?.quote?.ticker)return [];try{return [{...normalizeEarningsEvent({symbol:analysisData.quote.ticker,date:e.nextDate,epsEstimate:e.epsEstimate,revenueEstimate:e.revenueEstimate,source:analysisData.events.source||"Yahoo Finance",status:"unconfirmed"}),origin:"auto"}];}catch{return []; }},[analysisData]);
  const events=useMemo(()=>buildCorporateCalendar({earnings:[...autoEarnings,...data.earnings],dividends:data.dividends}),[autoEarnings,data.earnings,data.dividends]);
  const macroRegime=useMemo(()=>classifyMacroRegime(macroRows),[macroRows]);
- const addTrade=(e)=>{e.preventDefault();setError("");try{if(side==="BUY"&&["EUR","USD"].includes(currency)&&Number(quantity)*Number(price)<5000)throw new Error("Investimento minimo per acquisto: 5.000 "+currency);const trade={id:crypto.randomUUID(),symbol:ticker,side,quantity:Number(quantity),price:Number(price),currency,date:tradeDate,fees:Number(fees),taxes:Number(portfolioTaxes)};const next=[...data.trades,trade];buildPositions(next);setData({...data,trades:next});setTicker("");setPrice("");setPortfolioTaxes("0");}catch(err){setError(err.message);}};
+ const addTrade=(e)=>{e.preventDefault();setError("");try{validateMinimumInvestment({side,quantity:Number(quantity),price:Number(price),currency});const trade={id:crypto.randomUUID(),symbol:ticker,side,quantity:Number(quantity),price:Number(price),currency,date:tradeDate,fees:Number(fees),taxes:Number(portfolioTaxes)};const next=[...data.trades,trade];buildPositions(next);setData({...data,trades:next});setTicker("");setPrice("");setPortfolioTaxes("0");}catch(err){setError(err.message);}};
  const addEvent=(e)=>{e.preventDefault();setError("");try{if(!eventSource.trim()||!eventTicker.trim())throw new Error("Titolo e fonte del dato sono obbligatori");if(eventType==="earnings"){const event=normalizeEarningsEvent({symbol:eventTicker,date:eventDate,epsEstimate:epsEstimate===""?null:Number(epsEstimate),epsActual:epsActual===""?null:Number(epsActual),source:eventSource.trim(),status:"unconfirmed"});setData({...data,earnings:[...data.earnings,event]});}else{const event=normalizeDividend({symbol:eventTicker,amount:Number(dividendAmount),currency:dividendCurrency,exDate:eventDate,source:eventSource.trim(),status:"unconfirmed"});setData({...data,dividends:[...data.dividends,event]});}setEventTicker("");setEventSource("");setEpsEstimate("");setEpsActual("");setDividendAmount("");}catch(err){setError(err.message);}};
  const removeTrade=(id)=>setData({...data,trades:data.trades.filter(t=>t.id!==id)});
  const loadMarketHistory=async(e)=>{e.preventDefault();setMarketError("");setMarketLoading(true);try{const result=await loadAlphaVantageDaily({symbol:marketTicker.trim().toUpperCase(),apiKey:marketApiKey});setMarketRows(result.rows.slice(-10).reverse());setMarketHistory(result.rows);setBacktestResult(null);setBacktestError("");const closes=result.rows.map(x=>x.close);setMarketIndicators({sma20:sma(closes,20),sma50:sma(closes,50),ema20:ema(closes,20),rsi14:rsi(closes,14),observations:closes.length,asOf:result.rows.at(-1)?.date??null});setMarketUsage(getAlphaVantageUsage());}catch(err){setMarketError(err.message);setMarketUsage(getAlphaVantageUsage());}finally{setMarketLoading(false);}};
