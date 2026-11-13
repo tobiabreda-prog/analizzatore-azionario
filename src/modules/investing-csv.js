@@ -1,4 +1,4 @@
-import { normalizeTrade } from "./portfolio.js";
+import { buildPositions, normalizeTrade } from "./portfolio.js";
 import { splitLine, parseNumber, isoDate } from "./trade-csv.js";
 
 // Import dell'export "Portafoglio" di Investing.com (CSV multi-sezione, separatore virgola, numeri all'italiana).
@@ -28,18 +28,25 @@ export function parseInvestingCsv(text) {
   if (!isInvestingCsv(text)) throw new Error("Il file non sembra un export portafoglio di Investing.com");
   const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
   let section = null, headers = null;
-  const rawOpen = [], rawClosed = [];
+  const rawOpen = [], rawClosed = [], rawSummary = [];
   lines.forEach((line, i) => {
     if (!line.trim()) { section = null; headers = null; return; }
     const f = splitLine(line, ",");
     if (norm(f[0]) !== "") {
       const t = norm(f[0]);
-      section = f.length === 1 && t === "posizioni aperte" ? "open" : f.length === 1 && t === "posizioni chiuse" ? "closed" : null;
+      section = f.length === 1 && t === "posizioni aperte" ? "open" : f.length === 1 && t === "posizioni chiuse" ? "closed" : f.length === 1 && t === "riepilogo posizioni aperte" ? "summary" : null;
       headers = null;
       return;
     }
     if (!section) return;
     if (!headers) { headers = f.map(norm); return; }
+    if (section === "summary") {
+      const col = (...names) => headers.findIndex((h) => names.includes(h));
+      const ix = {sym: col("simbolo"), exch: col("borsa"), qty: col("quantita")};
+      if (Object.values(ix).some((v) => v < 0)) throw new Error("Riepilogo Investing.com senza colonne Simbolo, Borsa o Quantità");
+      rawSummary.push({row:f,ix,line:i+1});
+      return;
+    }
     const col = (...names) => headers.findIndex((h) => names.includes(h));
     const ix = section === "open"
       ? { exch: col("borsa"), sym: col("simbolo"), date: col("data ap."), type: col("tipo"), qty: col("quantita"), price: col("prez ap."), fee: col("commissione"), value: col("valore di mercato") }
@@ -79,7 +86,17 @@ export function parseInvestingCsv(text) {
     trades.push(normalizeTrade({ id: base + ":S", date: closeDate, symbol, side: "SELL", quantity, price: closePrice, currency, fees: 0, taxes: 0, source: "investing.com" }));
   });
 
-  if (!trades.length) throw new Error("Nessuna posizione trovata nelle sezioni \"Posizioni aperte\" e \"Posizioni chiuse\"");
+  if (!trades.length) throw new Error("Nessuna posizione trovata nelle sezioni \"Posizioni aperte\" e \"Posizioni chiuse\". Il solo riepilogo non contiene date di acquisto e non può essere importato come movimenti.");
+  if (rawSummary.length) {
+    const actual = new Map(buildPositions(trades).map((p) => [p.symbol, p.quantity]));
+    for (const {row, ix, line} of rawSummary) wrap(line, () => {
+      const symbol = cleanSymbol(row[ix.sym], row[ix.exch]);
+      const expected = parseNumber(row[ix.qty], "Quantità riepilogo");
+      if (!symbol || expected < 0) throw new Error("Simbolo o quantità del riepilogo non valida");
+      const found = actual.get(symbol) ?? 0;
+      if (Math.abs(found - expected) > 1e-6) throw new Error("Riepilogo non riconciliato per " + symbol + ": attesi " + expected + ", importati " + found + ". Importazione annullata.");
+    });
+  }
   trades.sort((a, b) => a.date.localeCompare(b.date) || (a.side === b.side ? 0 : a.side === "BUY" ? -1 : 1));
-  return { trades, openLots: rawOpen.length, closedLots: rawClosed.length };
+  return { trades, openLots: rawOpen.length, closedLots: rawClosed.length, summaryPositions: rawSummary.length };
 }
