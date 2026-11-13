@@ -77,6 +77,15 @@ export function calculateAutomaticDcf(data,research,{now=new Date(),terminalGrow
  else if(!percent(research.wacc,2,35))
   problems.push("WACC fuori dall'intervallo di plausibilità.");
  const newest=now.toISOString().slice(0,10);
+
+ if(evidenceValid(research)){
+  const v=Object.fromEntries(evidenceKeys.map(k=>[k,research.inputs[k].value]));
+  const plausible=percent(v.riskFree,0,20)&&percent(v.beta,0,4)&&percent(v.equityRiskPremium,1,15)&&
+   percent(v.costOfDebt,0,30)&&percent(v.taxRate,0,60)&&percent(v.equityWeight,0,1);
+  const computed=v.equityWeight*(v.riskFree+v.beta*v.equityRiskPremium)+(1-v.equityWeight)*v.costOfDebt*(1-v.taxRate/100);
+  if(!plausible||!finite(computed)||Math.abs(computed-research.wacc)>0.005)
+   problems.push("Parametri WACC incoerenti con la formula CAPM: calcolo automatico bloccato.");
+ }
  if(evidenceValid(research)&&evidenceKeys.some(k=>daysBetween(research.inputs[k].date,newest)<0||daysBetween(research.inputs[k].date,newest)>(k==="riskFree"||k==="beta"?180:550)))
   problems.push("Uno o più parametri WACC sono troppo vecchi o con data futura.");
  if(!percent(terminalGrowthPercent,0,4))
