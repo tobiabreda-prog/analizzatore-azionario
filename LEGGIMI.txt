@@ -10,3 +10,7 @@ COME OTTENERE L'APK (senza installare nulla sul PC)
 
 In alternativa, con Android Studio + JDK 17:  npm install && npm run build && npx cap add android && npx cap sync android
 poi Build > Build APK(s) in Android Studio.
+
+TEST: npm install && npm test  (la build dell'APK esegue i test e si ferma se falliscono).
+STRUTTURA: src/scoring.js (punteggi, etichetta, livelli), src/fundamentals.js, src/analysts.js,
+src/providers/ (yahoo, finnhub, alpha), src/lib/ (utilita', indicatori, formati), tests/.
