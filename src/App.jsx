@@ -512,15 +512,18 @@ export default function AnalizzatoreAzionario() {
         {showKey && (
           <div className={`rounded-xl border p-3 text-sm space-y-2 ${th.card}`}>
             <div className="font-medium">Chiave API Gemini</div>
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-500 underline underline-offset-2">Ottieni la chiave Gemini — Google AI Studio ↗</a>
             <div className={`text-xs ${th.mute}`}>Salvata solo su questo dispositivo. Usa un progetto Google AI Studio senza fatturazione collegata: l’app usa solo gemini-3.5-flash-lite e non attiva Search grounding.</div>
-            <input type="password" value={keyVal} onChange={(e) => setKeyVal(e.target.value)} placeholder="AIza…" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
+            <input type="password" value={keyVal} onChange={(e) => setKeyVal(e.target.value)} placeholder="Please, insert relative API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="font-medium pt-1">Chiave Alpha Vantage (facoltativa)</div>
+            <a href="https://www.alphavantage.co/support/#api-key" target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-500 underline underline-offset-2">Ottieni la chiave Alpha Vantage ↗</a>
             <div className={`text-xs ${th.mute}`}>Aggiunge target price e rating per i titoli USA (25 richieste al giorno). Gratis su alphavantage.co/support/#api-key</div>
-            <input type="password" value={avVal} onChange={(e) => setAvVal(e.target.value)} placeholder="Alpha Vantage API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
+            <input type="password" value={avVal} onChange={(e) => setAvVal(e.target.value)} placeholder="Please, insert relative API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className={`text-xs ${th.mute}`}>Piano gratuito: 25 richieste al giorno. L’app usa Alpha Vantage solo come integrazione facoltativa; le serie sono giornaliere, non realtime.</div>
             <div className="font-medium pt-1">Chiave FRED (facoltativa)</div>
+            <a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-500 underline underline-offset-2">Ottieni la chiave FRED — Federal Reserve ↗</a>
             <div className={`text-xs ${th.mute}`}>Configurala qui una sola volta per gli indicatori macro del Workspace.</div>
-            <input type="password" value={fredVal} onChange={(e) => setFredVal(e.target.value)} placeholder="FRED API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
+            <input type="password" value={fredVal} onChange={(e) => setFredVal(e.target.value)} placeholder="Please, insert relative API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="flex gap-2">
               <button disabled={testing} onClick={testKey} className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>Testa chiave</button>
               <button onClick={() => { saveApiKey("gemini", keyVal.trim()); saveApiKey("alphavantage", avVal.trim()); saveApiKey("fred", fredVal.trim()); try { localStorage.removeItem("gemini_model"); localStorage.removeItem("finnhub_key"); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium">Salva</button>
