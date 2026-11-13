@@ -239,7 +239,6 @@ export default function AnalizzatoreAzionario() {
     m.content = bg;
   }, [dark]);
   const [showV2, setShowV2] = useState(false);
-  const [workspaceTab, setWorkspaceTab] = useState("watchlist");
   const [aiBusy, setAiBusy] = useState(false);
   const requestId = useRef(0);
   const [input, setInput] = useState("");
@@ -491,7 +490,7 @@ export default function AnalizzatoreAzionario() {
 
   const cfColor = (n) => (n == null || isNaN(n) ? "" : n > 0 ? "text-emerald-500" : n < 0 ? "text-red-500" : "");
 
-  if (showV2) return <V2Console initialTab={workspaceTab} onSelectSymbol={(symbol,mode) => { const automatic=mode==="valuation"; setWorkspaceTab(automatic?"valuation":"watchlist"); setShowV2(automatic); setInput(symbol); run(symbol, false, false); }} dark={dark} onBack={() => setShowV2(false)} onSettings={() => { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); setShowKey(true); setShowV2(false); }} analysisData={data} analysisScore={S} />;
+  if (showV2) return <V2Console onSelectSymbol={(symbol) => { setShowV2(false); setInput(symbol); run(symbol, false, false); }} dark={dark} onBack={() => setShowV2(false)} onSettings={() => { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); setShowKey(true); setShowV2(false); }} analysisData={data} />;
 
   return (
     <div className={`app-shell min-h-screen ${th.bg} ${dark ? "theme-dark" : "theme-light"}`}>
@@ -506,7 +505,7 @@ export default function AnalizzatoreAzionario() {
             </div>
           </div>
           <div className="app-actions">
-            <button onClick={() => {setWorkspaceTab("watchlist");setShowV2(true);}} className="app-action-button app-workspace-button" aria-label="Apri workspace 2.0"><TrendingUp size={16} /><span>Workspace 2.0</span></button>
+            <button onClick={() => setShowV2(true)} className="app-action-button app-workspace-button" aria-label="Apri watchlist"><TrendingUp size={16} /><span>Watchlist</span></button>
             <button onClick={() => { if (!showKey) { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); } setShowKey(!showKey); }} className="app-action-button" aria-label="Impostazioni fonti dati"><Key size={16} /></button>
             <button onClick={() => { const nd = !dark; setDark(nd); setThemeFixed(true); try { localStorage.setItem("theme", nd ? "dark" : "light"); } catch (e) {} }} className="app-action-button" aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
           </div>
@@ -517,7 +516,7 @@ export default function AnalizzatoreAzionario() {
               <div className="app-hero-eyebrow"><span className="app-live-dot" /> IL TUO CENTRO DI ANALISI DEGLI INVESTIMENTI</div>
               <h2>Investi con metodo.<br /><span>Decidi con dati.</span></h2>
               <p>Valutazioni fondamentali e tecniche, contesto macroeconomico e controllo del rischio. Nessun segnale viene mostrato quando i dati non superano i controlli di qualità.</p>
-              <div className="app-hero-tags"><span>Fonti gratuite</span><span>Fondamentali</span><span>Analisi tecnica</span><span>DCF sperimentale</span><span>Risk management</span></div>
+              <div className="app-hero-tags"><span>Fonti gratuite</span><span>Fondamentali</span><span>Analisi tecnica</span><span>Watchlist</span><span>Risk management</span></div>
             </div>
             <div className="app-hero-art" aria-hidden="true">
               <div className="app-hero-orbit orbit-one" /><div className="app-hero-orbit orbit-two" />
@@ -600,8 +599,8 @@ export default function AnalizzatoreAzionario() {
           </div>
         )}
         <nav aria-label="Navigazione rapida" className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => {setWorkspaceTab("watchlist");setShowV2(true);}} className={`px-3 py-2 rounded-lg border text-sm ${th.card}`}>Watchlist</button>
-          <button type="button" disabled={!q} onClick={() => {setWorkspaceTab("valuation");setShowV2(true);}} className={`px-3 py-2 rounded-lg border text-sm disabled:opacity-50 ${th.card}`}>Verifica DCF{q?.ticker?" · "+q.ticker:""}</button>
+          <button type="button" onClick={() => setShowV2(true)} className={`px-3 py-2 rounded-lg border text-sm ${th.card}`}>Watchlist</button>
+          
           <span className={`self-center text-xs ${th.mute}`}>Report: {cur||"seleziona un ticker"}</span>
         </nav>
 

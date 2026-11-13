@@ -13,7 +13,6 @@ export const ANALYSIS_TTL = Object.freeze({
   mkt: 6 * 60 * 60 * 1000,
   newsRaw: 60 * 60 * 1000,
   ai: 6 * 60 * 60 * 1000,
-  wacc: 24 * 60 * 60 * 1000,
 });
 export const CACHE_SECTIONS = ["quote","fin","val","events","an","mkt","newsRaw"];
 export const normalizeSymbol = symbol => String(symbol || "").trim().toUpperCase();
