@@ -293,6 +293,7 @@ export default function AnalizzatoreAzionario() {
   const [warns, setWarns] = useState([]);
   const [cachedAt, setCachedAt] = useState(null);
   const [avVal, setAvVal] = useState(() => getApiKey("alphavantage"));
+  const [fredVal, setFredVal] = useState(() => getApiKey("fred"));
   const [diag, setDiag] = useState(null);
   const [diagBusy, setDiagBusy] = useState(false);
   const runDiag = async () => { setDiagBusy(true); setDiag(null); try { setDiag(await diagnostics("", avVal.trim())); } catch (e) { setDiag([{ name: "Diagnostica", ok: false, detail: e.message }]); } finally { setDiagBusy(false); } };
@@ -342,8 +343,7 @@ export default function AnalizzatoreAzionario() {
     const acc = resume ? { ...data } : {};
     const w = [];
     setWarns([]);
-    let avKey = "";
-    try { avKey = (localStorage.getItem("av_key") || "").trim(); } catch (e) {}
+    const avKey = getApiKey("alphavantage").trim();
     const soft = async (fn, empty, label) => {
       try { return await fn(); } catch (e) { w.push(`${label}: dati non disponibili (${e.message.slice(0, 80)})`); setWarns([...w]); return empty; }
     };
@@ -474,7 +474,7 @@ export default function AnalizzatoreAzionario() {
 
   const cfColor = (n) => (n == null || isNaN(n) ? "" : n > 0 ? "text-emerald-500" : n < 0 ? "text-red-500" : "");
 
-  if (showV2) return <V2Console dark={dark} onBack={() => setShowV2(false)} analysisData={data} analysisScore={S} />;
+  if (showV2) return <V2Console dark={dark} onBack={() => setShowV2(false)} onSettings={() => { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); setShowKey(true); setShowV2(false); }} analysisData={data} analysisScore={S} />;
 
   return (
     <div className={`app-shell min-h-screen ${th.bg} ${dark ? "theme-dark" : "theme-light"}`}>
@@ -490,7 +490,7 @@ export default function AnalizzatoreAzionario() {
           </div>
           <div className="app-actions">
             <button onClick={() => setShowV2(true)} className="app-action-button app-workspace-button" aria-label="Apri workspace 2.0"><TrendingUp size={16} /><span>Workspace 2.0</span></button>
-            <button onClick={() => { if (!showKey) { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); } setShowKey(!showKey); }} className="app-action-button" aria-label="Impostazioni fonti dati"><Key size={16} /></button>
+            <button onClick={() => { if (!showKey) { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); } setShowKey(!showKey); }} className="app-action-button" aria-label="Impostazioni fonti dati"><Key size={16} /></button>
             <button onClick={() => { const nd = !dark; setDark(nd); setThemeFixed(true); try { localStorage.setItem("theme", nd ? "dark" : "light"); } catch (e) {} }} className="app-action-button" aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
           </div>
         </header>
@@ -518,9 +518,12 @@ export default function AnalizzatoreAzionario() {
             <div className={`text-xs ${th.mute}`}>Aggiunge target price e rating per i titoli USA (25 richieste al giorno). Gratis su alphavantage.co/support/#api-key</div>
             <input type="password" value={avVal} onChange={(e) => setAvVal(e.target.value)} placeholder="Alpha Vantage API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className={`text-xs ${th.mute}`}>Piano gratuito: 25 richieste al giorno. L’app usa Alpha Vantage solo come integrazione facoltativa; le serie sono giornaliere, non realtime.</div>
+            <div className="font-medium pt-1">Chiave FRED (facoltativa)</div>
+            <div className={`text-xs ${th.mute}`}>Configurala qui una sola volta per gli indicatori macro del Workspace.</div>
+            <input type="password" value={fredVal} onChange={(e) => setFredVal(e.target.value)} placeholder="FRED API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="flex gap-2">
               <button disabled={testing} onClick={testKey} className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>Testa chiave</button>
-              <button onClick={() => { saveApiKey("gemini", keyVal.trim()); saveApiKey("alphavantage", avVal.trim()); try { localStorage.removeItem("gemini_model"); localStorage.removeItem("finnhub_key"); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium">Salva</button>
+              <button onClick={() => { saveApiKey("gemini", keyVal.trim()); saveApiKey("alphavantage", avVal.trim()); saveApiKey("fred", fredVal.trim()); try { localStorage.removeItem("gemini_model"); localStorage.removeItem("finnhub_key"); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium">Salva</button>
             </div>
             <button disabled={diagBusy} onClick={runDiag} className={`w-full px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>{diagBusy ? "Test dati in corso…" : "Testa fonti dati"}</button>
             {diag && (
