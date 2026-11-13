@@ -22,19 +22,19 @@ export function parseTradeCsv(text){
  const delimiter=(lines[0].match(/;/g)||[]).length>=(lines[0].match(/,/g)||[]).length?";":",";
  const headers=splitLine(lines[0],delimiter).map(norm);
  const find=(...names)=>headers.findIndex(h=>names.includes(h));
- const ix={date:find("date","data"),symbol:find("symbol","ticker","strumento"),side:find("side","operazione","operation"),quantity:find("quantity","quantita","qty"),price:find("price","prezzo"),currency:find("currency","valuta"),fees:find("fees","fee","commissioni")};
+ const ix={date:find("date","data"),symbol:find("symbol","ticker","strumento"),side:find("side","operazione","operation"),quantity:find("quantity","quantita","qty"),price:find("price","prezzo"),currency:find("currency","valuta"),fees:find("fees","fee","commissioni"),taxes:find("taxes","tax","imposte","tobin tax")};
  for(const k of ["date","symbol","side","quantity","price","currency"])if(ix[k]<0)throw new Error("Colonna obbligatoria mancante: "+k);
  const trades=lines.slice(1).map((line,i)=>{
   const row=splitLine(line,delimiter);const get=k=>ix[k]>=0?row[ix[k]]:null;
   const sideRaw=norm(get("side"));const side= ["buy","acquisto","compra"].includes(sideRaw)?"BUY":["sell","vendita","vendi"].includes(sideRaw)?"SELL":null;
   if(!side)throw new Error("Operazione non riconosciuta alla riga "+(i+2));
-  const trade={id:"csv-"+(globalThis.crypto?.randomUUID?.()??(Date.now()+"-"+i)),date:isoDate(get("date")),symbol:get("symbol"),side,quantity:parseNumber(get("quantity"),"Quantità"),price:parseNumber(get("price"),"Prezzo"),currency:String(get("currency")).trim().toUpperCase(),fees:ix.fees>=0&&String(get("fees")??"").trim()?parseNumber(get("fees"),"Commissioni"):0};
+  const trade={id:"csv-"+(globalThis.crypto?.randomUUID?.()??(Date.now()+"-"+i)),date:isoDate(get("date")),symbol:get("symbol"),side,quantity:parseNumber(get("quantity"),"Quantità"),price:parseNumber(get("price"),"Prezzo"),currency:String(get("currency")).trim().toUpperCase(),fees:ix.fees>=0&&String(get("fees")??"").trim()?parseNumber(get("fees"),"Commissioni"):0,taxes:ix.taxes>=0&&String(get("taxes")??"").trim()?parseNumber(get("taxes"),"Imposte"):0};
   return normalizeTrade(trade);
  });
  return trades;
 }
 function quote(v){const s=String(v??"");return /[;"\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
 export function serializeTradesCsv(trades){
- const rows=[["date","symbol","side","quantity","price","currency","fees"],...trades.map(t=>[t.date,t.symbol,t.side,t.quantity,t.price,t.currency,t.fees??0])];
+ const rows=[["date","symbol","side","quantity","price","currency","fees","taxes"],...trades.map(t=>[t.date,t.symbol,t.side,t.quantity,t.price,t.currency,t.fees??0,t.taxes??0])];
  return rows.map(row=>row.map(quote).join(";")).join("\r\n");
 }
