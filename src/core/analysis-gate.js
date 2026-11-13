@@ -26,8 +26,8 @@ export function assessAnalysisReadiness({ quote, fin, val, scores = {}, now = ne
   const valuationAge = ageDays(val?.asOf, now);
   if (!val?.source || valuationAge == null || valuationAge < -1 || valuationAge > 7) reasons.push("Fonte o data dei multipli assente/non aggiornata");
   const metrics = Array.isArray(val?.metrics) ? val.metrics : [];
-  const comparable = metrics.filter((m) => finite(m?.v) && m.v > 0 && (finite(m?.sector) && m.sector > 0 || finite(m?.hist5y) && m.hist5y > 0));
-  if (!comparable.length) reasons.push("Valutazione senza multipli confrontabili con settore o storico");
+  const comparable = metrics.filter((m) => { const metricAge=ageDays(m?.date,now); return finite(m?.v)&&m.v>0&&(finite(m?.sector)&&m.sector>0||finite(m?.hist5y)&&m.hist5y>0)&&metricAge!=null&&metricAge>=-1&&metricAge<=45; });
+  if (!comparable.length) reasons.push("Valutazione senza multipli confrontabili aggiornati (osservazione oltre 45 giorni o data assente)");
   const required = ["Trend tecnico", "Crescita", "Redditività", "Valutazione"];
   const missingRequired = required.filter((key) => !finite(scores[key]));
   if (missingRequired.length) reasons.push("Fattori essenziali non disponibili: " + missingRequired.join(", "));
