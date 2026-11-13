@@ -414,6 +414,7 @@ export default function AnalizzatoreAzionario() {
     return (
       <div className={`flex flex-wrap items-center gap-1.5 text-xs ${th.mute}`}>
         <Clock size={12} /> {d || "n.d."} · {src || "fonte n.d."}
+        {String(src || "").includes("Yahoo Finance") && <span className="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-600 dark:text-sky-300 font-medium">Feed non ufficiale</span>}
         {stale && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 font-medium flex items-center gap-1"><AlertTriangle size={11} />Dato non aggiornato</span>}
       </div>
     );
@@ -479,7 +480,7 @@ export default function AnalizzatoreAzionario() {
               <div className="app-hero-eyebrow"><span className="app-live-dot" /> IL TUO CENTRO DI ANALISI DEGLI INVESTIMENTI</div>
               <h2>Investi con metodo.<br /><span>Decidi con dati.</span></h2>
               <p>Valutazioni fondamentali e tecniche, contesto macroeconomico e controllo del rischio. Nessun segnale viene mostrato quando i dati non superano i controlli di qualità.</p>
-              <div className="app-hero-tags"><span>Fondamentali</span><span>Analisi tecnica</span><span>Fair Value</span><span>Risk management</span></div>
+              <div className="app-hero-tags"><span>Fonti gratuite</span><span>Fondamentali</span><span>Analisi tecnica</span><span>Fair Value</span><span>Risk management</span></div>
             </div>
             <div className="app-hero-art" aria-hidden="true">
               <div className="app-hero-orbit orbit-one" /><div className="app-hero-orbit orbit-two" />
