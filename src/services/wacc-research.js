@@ -30,7 +30,7 @@ export function calculateWaccFromResearch(payload, groundedUrls) {
   const item=payload[field];
   if(!item||!finiteRange(item.value,...bounds[field]))throw new Error("Parametro mancante o non plausibile: "+field);
   if(!validUrl(item.url)||!groundedUrls.has(item.url))throw new Error("Fonte non verificata per "+field+": ricerca da ripetere.");
-  if(!item.date||!/^(20\\d{2})(-\\d{2})?(-\\d{2})?$/.test(item.date))throw new Error("Data della fonte mancante: "+field);
+  if(!item.date||!/^(20\d{2})(-\d{2})?(-\d{2})?$/.test(item.date))throw new Error("Data della fonte mancante: "+field);
   evidence[field]=item;
  }
  const v=Object.fromEntries(fields.map(k=>[k,evidence[k].value]));
