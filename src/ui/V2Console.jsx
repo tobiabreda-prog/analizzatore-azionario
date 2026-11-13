@@ -73,7 +73,8 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
  const removeTrade=(id)=>setData({...data,trades:data.trades.filter(t=>t.id!==id)});
  const loadMarketHistory=async(e)=>{e.preventDefault();setMarketError("");setMarketLoading(true);try{const result=await loadAlphaVantageDaily({symbol:marketTicker.trim().toUpperCase(),apiKey:getApiKey("alphavantage")});setMarketRows(result.rows.slice(-10).reverse());setMarketHistory(result.rows);setBacktestResult(null);setBacktestError("");const closes=result.rows.map(x=>x.close);setMarketIndicators({sma20:sma(closes,20),sma50:sma(closes,50),ema20:ema(closes,20),rsi14:rsi(closes,14),observations:closes.length,asOf:result.rows.at(-1)?.date??null});setMarketUsage(getAlphaVantageUsage());}catch(err){setMarketError(err.message);setMarketUsage(getAlphaVantageUsage());}finally{setMarketLoading(false);}};
  const runBacktest=()=>{setBacktestError("");setBacktestResult(null);try{const signals=buildSmaCrossSignals(marketHistory,20,50);const result=runLongOnlyBacktest({bars:marketHistory.map(({date,close})=>({date,close})),signals,initialCapital:Number(initialCapital),feeBps:Number(feeBps),fixedFee:Number(fixedFee),buyTaxBps:Number(buyTaxBps),slippageBps:Number(slippageBps)});const equity=result.curve.map(x=>x.equity);const returns=equity.slice(1).map((v,i)=>v/equity[i]-1);setBacktestResult({...result,risk:analyzeRisk({returns,equityCurve:equity})});}catch(err){setBacktestError(err.message);}};
- const loadMacro=async(e)=>{e.preventDefault();setMacroError("");setMacroLoading(true);const series=[
+ const loadMacro=async(e)=>{e.preventDefault();if(macroLoading)return;setMacroError("");setMacroLoading(true);
+ const series=[
   {id:"FEDFUNDS",label:"Fed Funds rate",unit:"%"},
   {id:"CPIAUCSL",label:"US CPI index",unit:"index"},
   {id:"PCEPI",label:"US PCE price index",unit:"index"},
@@ -83,12 +84,35 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
   {id:"VIXCLS",label:"VIX volatility",unit:"index"},
   {id:"BAMLH0A0HYM2",label:"US high-yield spread",unit:"%"},
   {id:"DCOILWTICO",label:"WTI crude oil",unit:"USD/barrel"},
-  {id:"GOLDAMGBD228NLBM",label:"Gold AM fixing",unit:"USD/oz"},
-  {id:"IRLTLT01ITM156N",label:"Italy 10Y government yield (OECD)",unit:"%"},
-  {id:"IRLTLT01DEM156N",label:"Germany 10Y government yield (OECD)",unit:"%"},
+  {id:"IRLTLT01ITM156N",label:"Italy 10Y government yield (OECD historical)",unit:"%"},
+  {id:"IRLTLT01DEM156N",label:"Germany 10Y government yield (OECD historical)",unit:"%"},
   {id:"EXR.D.USD.EUR.SP00.A",label:"ECB USD per EUR",unit:"USD/EUR",provider:"ECB",flowRef:"EXR",seriesKey:"D.USD.EUR.SP00.A"},
   {id:"FM.D.U2.EUR.4F.KR.DFR.LEV",label:"ECB deposit facility rate",unit:"%",provider:"ECB",flowRef:"FM",seriesKey:"D.U2.EUR.4F.KR.DFR.LEV"}
- ];const results=await Promise.allSettled(series.map(async s=>{const rows=s.provider==="ECB"?await loadEcbSeries({flowRef:s.flowRef,seriesKey:s.seriesKey}):await loadFredObservations({seriesId:s.id,apiKey:getApiKey("fred")});return {...s,...(rows.at(-1)??{}),status:rows.length?"ok":"empty"};}));const rows=results.map((r,i)=>r.status==="fulfilled"?r.value:{...series[i],status:"error",error:r.reason?.message??"Errore provider"});const it=rows.find(x=>x.id==="IRLTLT01ITM156N"),de=rows.find(x=>x.id==="IRLTLT01DEM156N");if(it?.status==="ok"&&de?.status==="ok"&&it.date===de.date)rows.push({id:"BTP_BUND_PROXY",label:"Spread 10Y Italia-Germania (OECD monthly)",unit:"pp",value:it.value-de.value,date:it.date,source:"FRED/OECD",status:"ok"});setMacroRows(rows);setMacroLoading(false);};
+ ];
+ const rows=[];
+ try{
+  const key=getApiKey("fred");
+  for(const item of series){
+   try{
+    if(item.provider!=="ECB"&&!key){rows.push({...item,status:"error",error:"Chiave FRED mancante: apri Impostazioni API"});continue;}
+    const observations=item.provider==="ECB"
+      ?await loadEcbSeries({flowRef:item.flowRef,seriesKey:item.seriesKey})
+      :await loadFredObservations({seriesId:item.id,apiKey:key});
+    const latest=observations.at(-1);
+    rows.push({...item,...(latest??{}),status:latest?"ok":"empty"});
+   }catch(error){
+    rows.push({...item,status:"error",error:error?.message||"Errore provider"});
+   }
+   setMacroRows([...rows]);
+  }
+  const it=rows.find(x=>x.id==="IRLTLT01ITM156N"),de=rows.find(x=>x.id==="IRLTLT01DEM156N");
+  if(it?.status==="ok"&&de?.status==="ok"&&it.date===de.date)
+   rows.push({id:"BTP_BUND_PROXY",label:"Spread 10Y Italia-Germania (OECD storico)",unit:"pp",value:it.value-de.value,date:it.date,source:"FRED/OECD",status:"ok"});
+  setMacroRows([...rows]);
+  const failed=rows.filter(x=>x.status==="error").length;
+  if(failed)setMacroError(`${failed} indicatori non disponibili. Leggi il motivo riportato sotto ciascuna serie; i dati mancanti non sono considerati nei calcoli.`);
+ }finally{setMacroLoading(false);}
+};
  const exportTradesCsv=()=>{const blob=new Blob([serializeTradesCsv(data.trades)],{type:"text/csv;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="movimenti-portafoglio-"+today()+".csv";a.click();URL.revokeObjectURL(url);};
  const exportBackup=()=>{const blob=new Blob([JSON.stringify({schemaVersion:1,exportedAt:new Date().toISOString(),data},null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="analizzatore-azionario-backup-"+today()+".json";a.click();URL.revokeObjectURL(url);};
  const importBackup=(e)=>{const file=e.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(String(reader.result));const incoming=parsed?.data??parsed;if(!incoming||!Array.isArray(incoming.trades)||!Array.isArray(incoming.earnings)||!Array.isArray(incoming.dividends))throw new Error("Formato backup non riconosciuto");buildPositions(incoming.trades);incoming.earnings.forEach(normalizeEarningsEvent);incoming.dividends.forEach(normalizeDividend);setData(incoming);setError("Backup importato. Verifica i dati e conserva anche una copia del file originale.");}catch(err){setError("Importazione non riuscita: "+err.message);}finally{e.target.value="";}};reader.onerror=()=>setError("Impossibile leggere il file selezionato.");reader.readAsText(file);};
@@ -146,9 +170,9 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
   </section>}
   {tab==="macro"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}><div><h2 className="text-lg font-semibold">Indicatori macro globali</h2><p className={`text-xs ${muted}`}>Serie ufficiali FRED ed ECB Data Portal. Le frequenze e i ritardi di pubblicazione variano per indicatore; non sono quotazioni intraday.</p></div>
    <form onSubmit={loadMacro} className="flex flex-wrap items-center gap-3"><button disabled={macroLoading} className="rounded-lg bg-emerald-600 text-white p-2 flex items-center justify-center gap-2 text-sm disabled:opacity-50"><RefreshCw size={16}/>{macroLoading?"Caricamento…":"Aggiorna indicatori"}</button></form>
-   <p className={`text-xs ${muted}`}>Dodici richieste FRED per aggiornamento (serve la tua chiave gratuita); il cambio EUR/USD proviene da ECB Data Portal senza chiave. Le frequenze e i ritardi variano per serie. La chiave FRED viene letta dalle impostazioni API centralizzate della schermata principale, su questo dispositivo. Non usare questa modalità per una distribuzione pubblica multiutente.</p>
+   <p className={`text-xs ${muted}`}>Undici serie FRED aggiornate in sequenza (serve la tua chiave gratuita); il cambio EUR/USD proviene da ECB Data Portal senza chiave. Le frequenze e i ritardi variano per serie. La chiave FRED viene letta dalle impostazioni API centralizzate della schermata principale, su questo dispositivo. Non usare questa modalità per una distribuzione pubblica multiutente.</p>
    {macroError&&<p className="text-sm text-red-500">{macroError}</p>}
-   <div className="grid sm:grid-cols-2 gap-3">{macroRows.map(r=><div key={r.id} className="rounded-lg border border-slate-500/20 p-3"><div className="text-xs font-semibold">{r.label} <span className={muted}>({r.id})</span></div><div className="text-xl font-semibold mt-1">{r.status==="ok"?r.value.toLocaleString("it-IT",{maximumFractionDigits:3})+" "+r.unit:"n.d."}</div><div className={`text-xs ${muted}`}>{r.status==="ok"?"Osservazione: "+r.date:r.error||"Nessuna osservazione"}</div></div>)}</div>
+   <div className="grid sm:grid-cols-2 gap-3">{macroRows.map(r=><div key={r.id} className="rounded-lg border border-slate-500/20 p-3"><div className="text-xs font-semibold">{r.label} <span className={muted}>({r.id})</span></div><div className="text-xl font-semibold mt-1">{r.status==="ok"?r.value.toLocaleString("it-IT",{maximumFractionDigits:3})+" "+r.unit:"n.d."}</div><div className={`text-xs ${muted}`}>{r.status==="ok"?"Fonte: "+(r.source||r.provider||"FRED")+" · Osservazione: "+r.date:r.error||"Nessuna osservazione"}</div></div>)}</div>
    <div className="rounded-lg border border-slate-500/20 p-3 space-y-2"><div className="font-semibold text-sm">Regime di rischio USA (descrittivo)</div><div className="text-sm font-bold">{macroRegime.status==="insufficient_data"?"Dati insufficienti":macroRegime.regime==="risk_off"?"Risk-off":macroRegime.regime==="cautious"?"Cauto":macroRegime.regime==="risk_on"?"Risk-on":"Non classificato"}</div><div className={`text-xs ${muted}`}>{macroRegime.available}/{macroRegime.required} indicatori core aggiornati</div>{macroRegime.drivers.map((d,i)=><div key={i} className={`text-xs ${muted}`}>• {d}</div>)}</div>
    <p className={`text-xs ${muted}`}>Quadro macro descrittivo, non previsivo né calibrato: mancano inflazione armonizzata UE, spread BTP-Bund e validazione statistica. Il regime non genera segnali d'investimento né probabilità di scenario.</p>
   </section>}
