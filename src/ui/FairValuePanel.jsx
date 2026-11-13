@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { valueScenarios } from "../modules/fair-value.js";
+import { assessAutoDcf, calculateAutomaticDcf } from "../modules/auto-fair-value.js";
 import { readAnalysisSection, writeAnalysisSection } from "../services/analysis-cache.js";
 import { researchWacc } from "../services/wacc-research.js";
 
@@ -75,6 +76,39 @@ export default function FairValuePanel({dark=false,analysisData=null}){
   }catch(e){setResearchError(e.message||"Ricerca WACC non riuscita.");}
   finally{setResearchBusy(false);}
  };
+ const [autoStatus,setAutoStatus]=useState({stage:"waiting",issues:[],result:null});
+ const [autoRetry,setAutoRetry]=useState(0);
+ const autoInputs=useMemo(()=>({quote:analysisData?.quote||null,fin:analysisData?.fin||null}),[analysisData?.quote,analysisData?.fin]);
+ const autoCheck=useMemo(()=>assessAutoDcf(autoInputs),[autoInputs]);
+ useEffect(()=>{
+   if(!symbol){setAutoStatus({stage:"waiting",issues:["Seleziona AAPL o un altro titolo dalla watchlist."],result:null});return;}
+   if(!autoCheck.ok){
+     setAutoStatus({stage:"blocked",issues:autoCheck.problems,result:null});
+     return;
+   }
+   let cancelled=false;
+   const controller=new AbortController();
+   setAutoStatus({stage:"research",issues:[],result:null});
+   const execute=async()=>{
+     try {
+       // No hidden assumptions: reuse only a currency-matched, still valid sourced WACC.
+       const cached=autoRetry===0?readAnalysisSection(symbol,"wacc")?.value:null;
+       const sourced=cached?.currency===currency?cached:{
+         ...(await researchWacc({symbol,currency,signal:controller.signal})),currency
+       };
+       if(cancelled)return;
+       const outcome=calculateAutomaticDcf(autoInputs,sourced);
+       if(!outcome.ok){setAutoStatus({stage:"blocked",issues:outcome.problems,result:null});return;}
+       if(cached!==sourced)writeAnalysisSection(symbol,"wacc",sourced);
+       setAutoStatus({stage:"success",issues:[],result:outcome});
+     }catch(e){
+       if(cancelled)return;
+       setAutoStatus({stage:"blocked",issues:["Impossibile ottenere un WACC con fonti verificate: "+String(e.message||e).slice(0,220)],result:null});
+     }
+   };
+   void execute();
+   return ()=>{cancelled=true;controller.abort();};
+ },[symbol,currency,autoCheck,autoInputs,autoRetry]);
  const muted=dark?"text-slate-400":"text-slate-500";
  const field=dark?"bg-slate-950 border-slate-700":"bg-white border-slate-300";
  const calculate=(e)=>{
@@ -95,7 +129,30 @@ export default function FairValuePanel({dark=false,analysisData=null}){
   }catch(err){setError(err.message);}
  };
  return <section className="rounded-xl border p-4 space-y-4">
-  <div className="space-y-2"><h2 className="text-lg font-semibold">Fair Value · DCF a scenari</h2>
+  <div className="space-y-2">
+   <h2 className="text-lg font-semibold">Verifica DCF automatico · sperimentale</h2>
+   <p className={`text-sm ${muted}`}>Test in un clic dalla Watchlist, senza inserire parametri. Non mostra un Fair Value se mancano flussi d'impresa ricostruibili o WACC con fonti verificate. Gli scenari sono ipotesi, non prezzi obiettivo.</p>
+   {autoStatus.stage==="waiting"&&<p role="status" className="text-sm">In attesa dei dati del titolo selezionato.</p>}
+   {autoStatus.stage==="research"&&<p role="status" className="text-sm">Bilanci controllati: ricerca del WACC con fonti verificabili in corso…</p>}
+   {autoStatus.stage==="blocked"&&<div className="rounded-lg border border-amber-500/50 p-3 text-sm space-y-2" role="status">
+     <p className="font-semibold">Test automatico non superato per {symbol}</p>
+     <p>Nessun Fair Value automatico pubblicato: i dati mancanti non sono stati sostituiti da stime inventate.</p>
+     <ul className="list-disc pl-5 space-y-1">{autoStatus.issues.map((issue,i)=><li key={i}>{issue}</li>)}</ul>
+     <button type="button" onClick={()=>setAutoRetry(x=>x+1)} className="rounded-lg border px-3 py-1.5 text-xs">Riprova verifica automatica</button>
+   </div>}
+   {autoStatus.stage==="success"&&autoStatus.result&&<div role="status" className="rounded-lg border border-emerald-500/30 p-3 space-y-2">
+     <p className="font-semibold">DCF illustrativo automatico · {symbol}</p>
+     <p className="text-2xl font-bold">{money(autoStatus.result.valuation.weightedFairValue,currency)}</p>
+     <p className="text-xs">Scenari: {autoStatus.result.valuation.scenarios.map(x=>x.name+" "+money(x.valuePerShare,currency)).join(" · ")}</p>
+     <p className="text-xs">Crescita FCF ipotizzata: {autoStatus.result.assumptions.modelGrowth.toFixed(2)}% · WACC documentato: {autoStatus.result.assumptions.wacc.toFixed(2)}% · g terminale ipotizzata: {autoStatus.result.assumptions.terminalGrowth.toFixed(2)}%.</p>
+     <p className="text-xs">Fonte bilanci: {autoStatus.result.assumptions.source}. {autoStatus.result.warning}</p>
+     <details className="text-xs rounded-lg border p-2"><summary className="cursor-pointer font-semibold">Fonti del WACC · 6 parametri</summary><ul className="mt-2 space-y-1">{Object.entries(autoStatus.result.assumptions.waccEvidence).map(([key,v])=><li key={key}>{key}: {v.value} ({v.date}) · <a href={v.url} target="_blank" rel="noopener noreferrer" className="underline">Fonte dichiarata</a></li>)}</ul><p className="mt-2 text-amber-600">La presenza di un URL non garantisce da sola che la cifra sia corretta: confrontare con il documento originale.</p></details>
+   </div>}
+   </div>
+  <details className="rounded-lg border p-3">
+    <summary className="cursor-pointer text-sm font-semibold">Simulatore DCF manuale (solo analisi di sensibilità)</summary>
+    <div className="space-y-2">
+
    <p className={`text-xs ${muted}`}>Compilazione automatica dai bilanci caricati. FCF base: mediana dei FCF positivi degli ultimi 3 esercizi (almeno due valori positivi); crescita: CAGR storico con almeno 3 osservazioni, limitato tra −5% e +12%, altrimenti 5%. WACC non precompilato: deve essere stimato con parametri verificati (anche senza Gemini). Crescita terminale 2,5% è un’ipotesi standard modificabile, non un dato di mercato.</p>
    <p className={`text-xs ${muted}`}>Ultimo esercizio: {latestFcfYear??"n.d."} · Fonte: {analysisData?.fin?.source||"non specificata"} · Debito netto: {Number.isFinite(debt)?"disponibile":"mancante"}.</p>
    <p className="text-xs text-amber-600">Azioni: {Number.isFinite(reportedShares)&&reportedShares>0?"media annua diluita riportata dal provider (non numero corrente certo); verificare con il bilancio":Number.isFinite(impliedShares)?"solo stima indicativa da capitalizzazione ÷ prezzo: "+impliedShares.toFixed(2)+" mln. Inserire le azioni diluite verificate: la stima non viene applicata automaticamente":"dato mancante: inserire azioni diluite verificate"}. Importi in milioni e nella valuta del titolo. La data del bilancio può differire dalla data del prezzo.</p>
@@ -141,5 +198,6 @@ export default function FairValuePanel({dark=false,analysisData=null}){
    <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left"><th className="py-2">Scenario</th><th>Probabilità</th><th>WACC</th><th>g terminale</th><th>Fair value</th></tr></thead><tbody>{result.scenarios.map(s=><tr key={s.name} className="border-b border-slate-500/20"><td className="py-2 capitalize">{s.name}</td><td>{(s.probability*100).toFixed(0)}%</td><td>{(s.wacc*100).toFixed(1)}%</td><td>{(s.terminalGrowth*100).toFixed(1)}%</td><td className="font-semibold">{money(s.valuePerShare,currency)}</td></tr>)}</tbody></table></div>
    <p className={`text-xs ${muted}`}>Scenari convenzionali: Bear = FCF −15%, WACC +2 punti, g −1 punto; Base = ipotesi inserite; Bull = FCF +15%, WACC −1 punto e g +0,5 punti (vincolato a WACC &gt; g). Probabilità 25/50/25. Il risultato è estremamente sensibile alle ipotesi e non è una previsione né un segnale automatico.</p>
   </div>}
+  </details>
  </section>;
 }

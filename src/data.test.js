@@ -72,3 +72,25 @@ describe("fast fundamentals and DCF share count",()=>{
     expect(calls).toBe(1);
   });
 });
+
+describe("sourced unlevered cashflow inputs",()=>{
+ it("keeps CFO, CapEx, interest and tax aligned by financial year",async()=>{
+  const component=(type,rows)=>({meta:{type:[type]},[type]:rows.map(([year,raw])=>({asOfDate:year+"-09-26",reportedValue:{raw}}))});
+  setHttp(async url=>{
+   if(!url.includes("/fundamentals-timeseries/"))throw new Error("Unexpected request: "+url);
+   return {status:200,data:{timeseries:{result:[
+    component("annualTotalRevenue",[[2024,1000000000],[2025,1100000000],[2026,1200000000]]),
+    component("annualOperatingCashFlow",[[2024,118254000000],[2025,111482000000],[2026,145097000000]]),
+    component("annualCapitalExpenditure",[[2024,-9447000000],[2025,-12715000000],[2026,-9041000000]]),
+    component("annualInterestExpense",[[2024,1200000000],[2025,1300000000],[2026,1400000000]]),
+    component("annualTaxRateForCalcs",[[2024,.241],[2025,.156],[2026,.17]])
+   ]}}};
+  });
+  const r=await loadFundamentals("TEST",{includePeers:false});
+  expect(r.fin.annual).toHaveLength(3);
+  expect(r.fin.annual[2].operatingCashFlow).toBe(145097);
+  expect(r.fin.annual[2].capitalExpenditure).toBe(-9041);
+  expect(r.fin.annual[2].interestExpense).toBe(1400);
+  expect(r.fin.annual[2].effectiveTaxRate).toBe(.17);
+ });
+});

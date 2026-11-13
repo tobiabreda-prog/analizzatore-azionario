@@ -167,7 +167,7 @@ async function yseries(symbol, types, years) {
 const lastVal = (s, k) => { const a = s?.[k]; return a?.length ? a[a.length - 1].v : null; };
 const M = (x) => (num(x) == null ? null : round(x / 1e6, 1));
 
-const ANNUAL_TYPES = ["annualTotalRevenue", "annualNetIncome", "annualEBITDA", "annualGrossProfit", "annualOperatingIncome", "annualDilutedEPS", "annualDilutedAverageShares", "annualFreeCashFlow", "annualTotalDebt", "annualNetDebt", "annualStockholdersEquity", "annualCurrentAssets", "annualCurrentLiabilities", "annualInterestExpense", "annualEBIT", "annualTaxRateForCalcs", "annualInvestedCapital"];
+const ANNUAL_TYPES = ["annualTotalRevenue", "annualNetIncome", "annualEBITDA", "annualGrossProfit", "annualOperatingIncome", "annualDilutedEPS", "annualDilutedAverageShares", "annualFreeCashFlow", "annualOperatingCashFlow", "annualCapitalExpenditure", "annualTotalDebt", "annualNetDebt", "annualStockholdersEquity", "annualCurrentAssets", "annualCurrentLiabilities", "annualInterestExpense", "annualEBIT", "annualTaxRateForCalcs", "annualInvestedCapital"];
 const Q_TYPES = ["quarterlyTotalRevenue", "quarterlyNetIncome", "quarterlyDilutedEPS"];
 
 function buildFin(s) {
@@ -176,8 +176,14 @@ function buildFin(s) {
   put("annualTotalRevenue", "rev", M); put("annualNetIncome", "ni", M); put("annualEBITDA", "ebitda", M);
   put("annualGrossProfit", "gp", M); put("annualOperatingIncome", "op", M); put("annualDilutedEPS", "eps", (v) => round(v, 2));
   put("annualFreeCashFlow", "fcf", M);
+  put("annualOperatingCashFlow", "operatingCashFlow", M);
+  put("annualCapitalExpenditure", "capitalExpenditure", M);
+  put("annualInterestExpense", "interestExpense", M);
+  put("annualTaxRateForCalcs", "effectiveTaxRate", (v)=>v>=0&&v<=0.6?v:null);
   const annual = Object.values(byYear).filter((r) => r.rev != null).sort((a, b) => a.y - b.y).slice(-5)
-    .map((r) => ({ y: r.y, rev: r.rev, ni: r.ni ?? null, ebitda: r.ebitda ?? null, gp: r.gp ?? null, op: r.op ?? null, eps: r.eps ?? null, fcf: r.fcf ?? null }));
+    .map((r) => ({ y: r.y, rev: r.rev, ni: r.ni ?? null, ebitda: r.ebitda ?? null, gp: r.gp ?? null, op: r.op ?? null, eps: r.eps ?? null, fcf: r.fcf ?? null,
+       operatingCashFlow:r.operatingCashFlow??null, capitalExpenditure:r.capitalExpenditure??null,
+       interestExpense:r.interestExpense??null, effectiveTaxRate:r.effectiveTaxRate??null }));
 
   const qMap = {};
   const putQ = (type, key, conv) => (s[type] || []).forEach((e) => { (qMap[e.d] = qMap[e.d] || { d: e.d })[key] = conv(e.v); });

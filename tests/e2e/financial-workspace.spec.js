@@ -4,12 +4,13 @@ test("fair value calculates DCF scenarios without removed console tabs", async (
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Analizzatore Azionario" })).toBeVisible();
   await page.getByRole("button", { name: "Apri workspace 2.0" }).click();
-  await expect(page.getByRole("heading", { name: "Fair Value + Watchlist" })).toBeVisible();
-  await page.getByRole("button", { name: "Fair Value", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Fair Value · DCF a scenari" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Watchlist + Verifica DCF" })).toBeVisible();
+  await page.getByRole("button", { name: "Verifica DCF", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Verifica DCF automatico · sperimentale" })).toBeVisible();
   for (const removed of ["Backtest", "Macro", "Mercati", "Portafoglio", "Earnings"]) {
     await expect(page.getByRole("button", { name: removed, exact: true })).toHaveCount(0);
   }
+  await page.getByText("Simulatore DCF manuale (solo analisi di sensibilità)").click();
   await page.getByLabel("FCF base (mediana, milioni)").fill("100");
   await page.getByLabel("Crescita FCF annua (%)").fill("5");
   await page.getByLabel("WACC (%)").fill("9");
@@ -91,10 +92,32 @@ test("one tap from watchlist opens the linked report and fills Fair Value from c
   await page.getByRole("button",{name:"Apri workspace 2.0"}).click();
   await page.getByRole("button",{name:"Analizza AAPL"}).click();
   await expect(page.getByText("Apple test fixture")).toBeVisible();
-  await page.getByRole("button",{name:"Fair Value · AAPL"}).click();
+  await page.getByRole("button",{name:"Verifica DCF · AAPL"}).click();
   await expect(page.getByText(/Titolo selezionato:/)).toContainText("AAPL");
   await expect(page.getByLabel("FCF base (mediana, milioni)")).toHaveValue("120");
   await expect(page.getByLabel("Debito netto (milioni)")).toHaveValue("500");
   await expect(page.getByLabel("Azioni diluite (medie annue, milioni)")).toHaveValue("500");
   await expect(page.getByLabel("WACC (%)")).toHaveValue("");
+});
+
+test("AAPL one-click automatic test fails closed without full FCFF inputs and does not invent WACC",async({page})=>{
+ await page.addInitScript(()=>{
+  const now=Date.now(),entry=value=>({ts:now,value});
+  const quote={ticker:"AAPL",name:"Apple Inc.",currency:"USD",price:250,asOf:new Date().toISOString().slice(0,10),source:"SEC / Yahoo fixture"};
+  const fin={source:"SEC FY2026 - fixture",lastReportDate:"2026-09-26",balance:{netDebt:-56824,dilutedShares:14720.306},annual:[
+   {y:2024,fcf:108807,operatingCashFlow:118254,capitalExpenditure:-9447,effectiveTaxRate:.241},
+   {y:2025,fcf:98767,operatingCashFlow:111482,capitalExpenditure:-12715,effectiveTaxRate:.156},
+   {y:2026,fcf:136056,operatingCashFlow:145097,capitalExpenditure:-9041,effectiveTaxRate:.170}
+  ]};
+  const val={metrics:[],peers:[],source:"Fixture",asOf:new Date().toISOString().slice(0,10)};
+  localStorage.setItem("aa2_fair_value_watchlist_v1",JSON.stringify(["AAPL"]));
+  localStorage.setItem("aa_analysis_segments_v1",JSON.stringify({AAPL:{quote:entry(quote),fin:entry(fin),val:entry(val)}}));
+ });
+ await page.goto("/");
+ await page.getByRole("button",{name:"Apri workspace 2.0"}).click();
+ await page.getByRole("button",{name:"Test DCF automatico AAPL"}).click();
+ await expect(page.getByRole("heading",{name:"Verifica DCF automatico · sperimentale"})).toBeVisible();
+ await expect(page.getByText("Test automatico non superato per AAPL")).toBeVisible();
+ await expect(page.getByText(/servono CFO, CapEx, interessi e aliquota/i)).toBeVisible();
+ await expect(page.getByText("DCF illustrativo automatico · AAPL")).toHaveCount(0);
 });
