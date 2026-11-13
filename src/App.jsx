@@ -285,7 +285,7 @@ export default function AnalizzatoreAzionario() {
       if (!k) throw new Error("Inserisci prima la chiave Gemini.");
       const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=" + encodeURIComponent(k), {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts: [{ text: "Rispondi esclusivamente con JSON: {\\\"ok\\\":true}" }] }], generationConfig: { responseMimeType: "application/json", maxOutputTokens: 32 } })
+        body: JSON.stringify({ contents: [{ parts: [{ text: '{"ok":true}' }] }], generationConfig: { responseMimeType: "application/json", maxOutputTokens: 32 } })
       });
       const body = await r.text();
       if (!r.ok) throw new Error("Gemini HTTP " + r.status + ": " + body.slice(0, 240));
