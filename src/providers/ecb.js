@@ -11,7 +11,7 @@ export async function loadEcbSeries({flowRef,seriesKey,startPeriod,endPeriod,api
  url.search=new URLSearchParams({format:"csvdata",detail:"dataonly",...(startPeriod?{startPeriod}:{}),...(endPeriod?{endPeriod}:{})});
  const response=await fetchImpl(url,{headers:{Accept:"text/csv",...(apiKey?{"Ocp-Apim-Subscription-Key":apiKey}:{})}});
  if(!response.ok)throw new Error("ECB HTTP "+response.status);
- const csv=(await response.text()).replace(/^\\uFEFF/,"").trim();const lines=csv.split(/\\r?\\n/);
+ const csv=(await response.text()).replace(/^\uFEFF/,"").trim();const lines=csv.split(/\r?\n/);
  if(lines.length<2)return [];
  const headers=parseCsvLine(lines[0]),timeIndex=headers.indexOf("TIME_PERIOD"),valueIndex=headers.indexOf("OBS_VALUE");
  if(timeIndex<0||valueIndex<0)throw new Error("Formato CSV ECB inatteso");
