@@ -21,4 +21,7 @@ test("workspace opens and calculates a scenario DCF", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Esegui backtest" })).toBeDisabled();
   await page.getByRole("button", { name: /Macro/ }).click();
   await expect(page.getByRole("heading", { name: "Indicatori macro globali" })).toBeVisible();
+  await page.getByRole("button", { name: /Earnings/ }).click();
+  await expect(page.getByRole("heading", { name: "Calendario societario" })).toBeVisible();
+  await expect(page.getByText(/Nessun dato automatico disponibile/)).toBeVisible();
 });
