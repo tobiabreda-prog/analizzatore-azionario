@@ -5,9 +5,9 @@ import { getApiKey } from "../services/api-settings.js";
 import { loadFredObservations } from "../providers/fred.js";
 import { loadEcbSeries } from "../providers/ecb.js";
 import { classifyMacroRegime } from "../core/macro-regime.js";
-import { buildPositions, validateMinimumInvestment } from "../modules/portfolio.js";
+import { buildPositions } from "../modules/portfolio.js";
 import { buildCorporateCalendar, normalizeDividend, normalizeEarningsEvent } from "../modules/earnings-dividends.js";
-import { serializeTradesCsv } from "../modules/trade-csv.js";
+import { serializeTradesCsv, parseTradeCsv } from "../modules/trade-csv.js";
 import { sma, ema, rsi } from "../modules/technical-indicators.js";
 import FairValuePanel from "./FairValuePanel.jsx";
 import { runLongOnlyBacktest } from "../modules/backtest.js";
@@ -24,6 +24,7 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
  const [data,setData]=useState(initial);
  const [tab,setTab]=useState("portfolio");
  const [error,setError]=useState("");
+ const [portfolioNotice,setPortfolioNotice]=useState("");
  const [ticker,setTicker]=useState("");
  const [side,setSide]=useState("BUY");
  const [quantity,setQuantity]=useState("1");
@@ -68,7 +69,16 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
  const autoEarnings=useMemo(()=>{const e=analysisData?.events?.earnings;if(!e?.nextDate||!analysisData?.quote?.ticker)return [];try{return [{...normalizeEarningsEvent({symbol:analysisData.quote.ticker,date:e.nextDate,epsEstimate:e.epsEstimate,revenueEstimate:e.revenueEstimate,source:analysisData.events.source||"Yahoo Finance",status:"unconfirmed"}),origin:"auto"}];}catch{return []; }},[analysisData]);
  const events=useMemo(()=>buildCorporateCalendar({earnings:[...autoEarnings,...data.earnings],dividends:data.dividends}),[autoEarnings,data.earnings,data.dividends]);
  const macroRegime=useMemo(()=>classifyMacroRegime(macroRows),[macroRows]);
- const addTrade=(e)=>{e.preventDefault();setError("");try{validateMinimumInvestment({side,quantity:Number(quantity),price:Number(price),currency});const trade={id:crypto.randomUUID(),symbol:ticker,side,quantity:Number(quantity),price:Number(price),currency,date:tradeDate,fees:Number(fees),taxes:Number(portfolioTaxes)};const next=[...data.trades,trade];buildPositions(next);setData({...data,trades:next});setTicker("");setPrice("");setPortfolioTaxes("0");}catch(err){setError(err.message);}};
+ const addTrade=(e)=>{e.preventDefault();setError("");setPortfolioNotice("");
+  try{
+   const number=(value,label)=>{const n=Number(String(value).trim().replace(",","."));if(!String(value).trim()||!Number.isFinite(n))throw new Error(label+": inserisci un numero valido");return n;};
+   const trade={id:globalThis.crypto?.randomUUID?.()??String(Date.now())+"-"+Math.random(),symbol:ticker.trim().toUpperCase(),side,quantity:number(quantity,"Quantità"),price:number(price,"Prezzo"),currency,date:tradeDate,fees:number(fees,"Commissioni"),taxes:number(portfolioTaxes,"Imposte")};
+   const next=[...data.trades,trade];buildPositions(next);
+   localStorage.setItem(STORE,JSON.stringify({...data,trades:next}));
+   setData(prev=>({...prev,trades:next}));setTicker("");setPrice("");setPortfolioTaxes("0");
+   setPortfolioNotice("Movimento registrato e salvato sul dispositivo.");
+  }catch(err){setError("Movimento non registrato: "+err.message);}
+ };
  const addEvent=(e)=>{e.preventDefault();setError("");try{if(!eventSource.trim()||!eventTicker.trim())throw new Error("Titolo e fonte del dato sono obbligatori");if(eventType==="earnings"){const event=normalizeEarningsEvent({symbol:eventTicker,date:eventDate,epsEstimate:epsEstimate===""?null:Number(epsEstimate),epsActual:epsActual===""?null:Number(epsActual),source:eventSource.trim(),status:"unconfirmed"});setData({...data,earnings:[...data.earnings,event]});}else{const event=normalizeDividend({symbol:eventTicker,amount:Number(dividendAmount),currency:dividendCurrency,exDate:eventDate,source:eventSource.trim(),status:"unconfirmed"});setData({...data,dividends:[...data.dividends,event]});}setEventTicker("");setEventSource("");setEpsEstimate("");setEpsActual("");setDividendAmount("");}catch(err){setError(err.message);}};
  const removeTrade=(id)=>setData({...data,trades:data.trades.filter(t=>t.id!==id)});
  const loadMarketHistory=async(e)=>{e.preventDefault();setMarketError("");setMarketLoading(true);try{const result=await loadAlphaVantageDaily({symbol:marketTicker.trim().toUpperCase(),apiKey:getApiKey("alphavantage")});setMarketRows(result.rows.slice(-10).reverse());setMarketHistory(result.rows);setBacktestResult(null);setBacktestError("");const closes=result.rows.map(x=>x.close);setMarketIndicators({sma20:sma(closes,20),sma50:sma(closes,50),ema20:ema(closes,20),rsi14:rsi(closes,14),observations:closes.length,asOf:result.rows.at(-1)?.date??null});setMarketUsage(getAlphaVantageUsage());}catch(err){setMarketError(err.message);setMarketUsage(getAlphaVantageUsage());}finally{setMarketLoading(false);}};
@@ -113,6 +123,21 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
   if(failed)setMacroError(`${failed} indicatori non disponibili. Leggi il motivo riportato sotto ciascuna serie; i dati mancanti non sono considerati nei calcoli.`);
  }finally{setMacroLoading(false);}
 };
+ const importTradesCsv=async(e)=>{
+  const file=e.target.files?.[0];if(!file)return;
+  setError("");setPortfolioNotice("");
+  try{
+   const text=await file.text();
+   const trades=parseTradeCsv(text);
+   if(!trades.length)throw new Error("Il CSV non contiene movimenti.");
+   buildPositions(trades);
+   const next={...data,trades};
+   localStorage.setItem(STORE,JSON.stringify(next));
+   setData(next);
+   setPortfolioNotice("Backup CSV ripristinato: "+trades.length+" movimenti. I movimenti precedenti sono stati sostituiti.");
+  }catch(err){setError("Ripristino CSV non riuscito: "+err.message);}
+  finally{e.target.value="";}
+ };
  const exportTradesCsv=()=>{const blob=new Blob([serializeTradesCsv(data.trades)],{type:"text/csv;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="movimenti-portafoglio-"+today()+".csv";a.click();URL.revokeObjectURL(url);};
  const exportBackup=()=>{const blob=new Blob([JSON.stringify({schemaVersion:1,exportedAt:new Date().toISOString(),data},null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="analizzatore-azionario-backup-"+today()+".json";a.click();URL.revokeObjectURL(url);};
  const importBackup=(e)=>{const file=e.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(String(reader.result));const incoming=parsed?.data??parsed;if(!incoming||!Array.isArray(incoming.trades)||!Array.isArray(incoming.earnings)||!Array.isArray(incoming.dividends))throw new Error("Formato backup non riconosciuto");buildPositions(incoming.trades);incoming.earnings.forEach(normalizeEarningsEvent);incoming.dividends.forEach(normalizeDividend);setData(incoming);setError("Backup importato. Verifica i dati e conserva anche una copia del file originale.");}catch(err){setError("Importazione non riuscita: "+err.message);}finally{e.target.value="";}};reader.onerror=()=>setError("Impossibile leggere il file selezionato.");reader.readAsText(file);};
@@ -151,16 +176,17 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
    {marketRows.length>0&&<div className="overflow-x-auto"><table className="w-full text-sm"><thead className={muted}><tr className="text-left border-b"><th className="py-2">Data</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th></tr></thead><tbody>{marketRows.map(r=><tr key={r.date} className="border-b border-slate-500/20"><td className="py-2">{r.date}</td><td>{r.open}</td><td>{r.high}</td><td>{r.low}</td><td className="font-semibold">{r.close}</td><td>{r.volume.toLocaleString("it-IT")}</td></tr>)}</tbody></table></div>}
    <p className={`text-xs ${muted}`}>I prezzi sono chiusure giornaliere. Prima di usarli per un'analisi verifica data, borsa, valuta e disponibilità del simbolo presso il provider. Nessun prezzo viene automaticamente attribuito al portafoglio.</p>
   </section>}
-  {tab==="portfolio"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}><div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="text-lg font-semibold">Registro movimenti</h2><p className={`text-xs ${muted}`}>Inserimento manuale dei movimenti di acquisto e vendita. Il sistema calcola costo medio e P&L realizzato; non valorizza le posizioni senza quotazioni verificate. Puoi esportare un CSV di backup dei movimenti registrati.</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={exportTradesCsv} className="rounded-lg border px-3 py-2 text-xs flex items-center gap-2"><Download size={14}/>Esporta CSV</button></div></div>
-   <p className={`text-xs ${muted}`}>Parametri Fineco per operatività non frequente, modificabili in base al tuo piano: 19,00 EUR per eseguito Italia e 12,95 USD per eseguito USA. La commissione è conteggiata sia in acquisto sia in vendita. Per ogni nuovo acquisto il workspace richiede almeno {MIN_INVESTMENT_NOTIONAL.toLocaleString("it-IT")} EUR o USD di controvalore. Per altre valute il preset è zero: inserisci manualmente la commissione effettiva. Inserisci separatamente le imposte effettivamente addebitate.</p>
+  {tab==="portfolio"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}><div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="text-lg font-semibold">Registro movimenti</h2><p className={`text-xs ${muted}`}>Inserisci acquisti e vendite manualmente. I movimenti sono salvati sul dispositivo. Esporta un backup CSV e reimporta esclusivamente il CSV generato da questa app; il formato Investing.com non è supportato.</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={exportTradesCsv} className="rounded-lg border px-3 py-2 text-xs flex items-center gap-2"><Download size={14}/>Esporta CSV</button><label className="rounded-lg border px-3 py-2 text-xs flex items-center gap-2 cursor-pointer"><Upload size={14}/>Ripristina CSV<input type="file" accept=".csv,text/csv" className="hidden" onChange={importTradesCsv}/></label></div></div>
+   <p className={`text-xs ${muted}`}>Inserisci il controvalore effettivo di ogni operazione, anche inferiore a 5.000 EUR/USD. Le commissioni proposte sono indicative e modificabili: verifica quelle realmente addebitate dal broker.</p>
+   {portfolioNotice&&<p role="status" className="rounded-lg border border-emerald-500/50 p-3 text-sm text-emerald-500">{portfolioNotice}</p>}
    <form onSubmit={addTrade} className="grid grid-cols-2 sm:grid-cols-4 gap-3">
     <label className="text-xs space-y-1">Ticker<input required value={ticker} onChange={e=>setTicker(e.target.value)} placeholder="es. ENI.MI" className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
     <label className="text-xs space-y-1">Operazione<select value={side} onChange={e=>setSide(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"><option value="BUY">Acquisto</option><option value="SELL">Vendita</option></select></label>
-    <label className="text-xs space-y-1">Quantità<input required type="number" min="0.000001" step="any" value={quantity} onChange={e=>setQuantity(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">Prezzo unitario<input required type="number" min="0.000001" step="any" value={price} onChange={e=>setPrice(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
+    <label className="text-xs space-y-1">Quantità<input required type="text" inputMode="decimal" value={quantity} onChange={e=>setQuantity(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
+    <label className="text-xs space-y-1">Prezzo unitario<input required type="text" inputMode="decimal" value={price} onChange={e=>setPrice(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
     <label className="text-xs space-y-1">Valuta<select value={currency} onChange={e=>{const v=e.target.value;setCurrency(v);setFees(String(defaultFinecoFee(v)));}} className="w-full rounded-lg border p-2 bg-transparent text-sm"><option>EUR</option><option>USD</option><option>GBP</option><option>CHF</option><option>JPY</option></select></label>
-    <label className="text-xs space-y-1">Commissioni broker (preset indicativi: EUR 19,00 / USD 12,95)<input type="number" min="0" step="any" value={fees} onChange={e=>setFees(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">Imposte (inserisci l’addebito effettivo)<input type="number" min="0" step="any" value={portfolioTaxes} onChange={e=>setPortfolioTaxes(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
+    <label className="text-xs space-y-1">Commissioni broker (preset indicativi: EUR 19,00 / USD 12,95)<input type="text" inputMode="decimal" value={fees} onChange={e=>setFees(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
+    <label className="text-xs space-y-1">Imposte (inserisci l’addebito effettivo)<input type="text" inputMode="decimal" value={portfolioTaxes} onChange={e=>setPortfolioTaxes(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
     <label className="text-xs space-y-1">Data<input type="date" required value={tradeDate} onChange={e=>setTradeDate(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
     <button className="self-end rounded-lg bg-emerald-600 text-white p-2 flex items-center justify-center gap-2 text-sm"><Plus size={16}/>Registra</button>
    </form>
