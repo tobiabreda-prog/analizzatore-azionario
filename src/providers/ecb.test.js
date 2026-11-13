@@ -6,7 +6,7 @@ describe("ECB CSV parser",()=>{
  it("rejects unterminated quoted fields",()=>{expect(()=>parseEcbCsvLine('"broken,2')).toThrow(/virgolette/);});
  it("requests the correct official SDMX dataflow/series path and parses observations",async()=>{
   let requested;
-  const rows=await loadEcbSeries({flowRef:"EXR",seriesKey:"D.USD.EUR.SP00.A",fetchImpl:async(url)=>{requested=new URL(url);return {ok:true,text:async()=>"KEY,TIME_PERIOD,OBS_VALUE\\nD.USD.EUR.SP00.A,2026-11-12,1.12"};}});
+  const rows=await loadEcbSeries({flowRef:"EXR",seriesKey:"D.USD.EUR.SP00.A",fetchImpl:async(url)=>{requested=new URL(url);return {ok:true,text:async()=>"KEY,TIME_PERIOD,OBS_VALUE\nD.USD.EUR.SP00.A,2026-11-12,1.12"};}});
   expect(requested.pathname).toBe("/service/data/EXR/D.USD.EUR.SP00.A");
   expect(requested.searchParams.get("format")).toBe("csvdata");
   expect(rows[0]).toMatchObject({date:"2026-11-12",value:1.12,source:"ECB"});
