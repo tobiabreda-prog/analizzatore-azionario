@@ -110,7 +110,7 @@ export function calculateAutomaticDcf(data,research,{now=new Date(),terminalGrow
     baseFcff:median,yearlyFcff:values,rawHistoricGrowth:historicGrowth*100,modelGrowth:growthRate*100,
     wacc:research.wacc,terminalGrowth:terminalGrowthPercent,forecastYears:5,
     shareCount:data.fin.balance.dilutedShares,netDebt:data.fin.balance.netDebt,
-    source:finSource(data.fin),riskFreeSource:research.inputs.riskFree.url
+    source:finSource(data.fin),waccEvidence:research.inputs
   },warning:"DCF illustrativo, non fair value certificato: il FCFF è ricostruito da dati del provider; tax rate, capitale circolante, SBC, valore terminale e futuro debito richiedono analisi."};
  }catch(e){
   return {ok:false,status:"INSUFFICIENT_DATA",problems:["DCF non calcolabile: "+String(e.message||e)],preflight};
