@@ -414,7 +414,7 @@ export default function AnalizzatoreAzionario() {
     return (
       <div className={`flex flex-wrap items-center gap-1.5 text-xs ${th.mute}`}>
         <Clock size={12} /> {d || "n.d."} · {src || "fonte n.d."}
-        {String(src || "").includes("Yahoo Finance") && <span className="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-600 dark:text-sky-300 font-medium">Feed non ufficiale</span>}
+        {String(src || "").includes("Yahoo Finance") && <span className="app-source-badge px-1.5 py-0.5 rounded font-medium">Feed non ufficiale</span>}
         {stale && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 font-medium flex items-center gap-1"><AlertTriangle size={11} />Dato non aggiornato</span>}
       </div>
     );
