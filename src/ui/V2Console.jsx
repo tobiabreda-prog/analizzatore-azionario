@@ -1,245 +1,95 @@
-import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Plus, Wallet, CalendarDays, ShieldCheck, AlertTriangle, Trash2, Download, Upload, LineChart, RefreshCw } from "lucide-react";
-import { loadAlphaVantageDaily, getAlphaVantageUsage } from "../providers/alphavantage.js";
-import { getApiKey } from "../services/api-settings.js";
-import { loadFredObservations } from "../providers/fred.js";
-import { loadEcbSeries } from "../providers/ecb.js";
-import { classifyMacroRegime } from "../core/macro-regime.js";
-import { buildPositions } from "../modules/portfolio.js";
-import { buildCorporateCalendar, normalizeDividend, normalizeEarningsEvent } from "../modules/earnings-dividends.js";
-import { serializeTradesCsv, parseTradeCsv } from "../modules/trade-csv.js";
-import { sma, ema, rsi } from "../modules/technical-indicators.js";
+import { useEffect, useState } from "react";
+import { ArrowLeft, Plus, Trash2, Download, Upload, AlertTriangle } from "lucide-react";
 import FairValuePanel from "./FairValuePanel.jsx";
-import { runLongOnlyBacktest } from "../modules/backtest.js";
-import { buildSmaCrossSignals } from "../modules/strategies.js";
-import { analyzeRisk } from "../core/risk-engine.js";
-import { MIN_INVESTMENT_NOTIONAL, FINECO_DEFAULT_FEES, defaultFinecoFee, minimumCapitalForOrder, formatItalianInteger, ITALIAN_FTT_BPS_2026 } from "../modules/trading-costs.js";
 
-const STORE="aa2_workspace_v1";
-const today=()=>new Date().toISOString().slice(0,10);
-const money=(v,c="EUR")=>Number.isFinite(v)?new Intl.NumberFormat("it-IT",{style:"currency",currency:c,maximumFractionDigits:2}).format(v):"n.d.";
-const initial=()=>({trades:[],earnings:[],dividends:[]});
-
-export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},analysisData=null,analysisScore=null}){
- const [data,setData]=useState(initial);
- const [tab,setTab]=useState("portfolio");
- const [error,setError]=useState("");
- const [portfolioNotice,setPortfolioNotice]=useState("");
- const [ticker,setTicker]=useState("");
- const [side,setSide]=useState("BUY");
- const [quantity,setQuantity]=useState("1");
- const [price,setPrice]=useState("");
- const [currency,setCurrency]=useState("EUR");
- const [fees,setFees]=useState(String(defaultFinecoFee("EUR")));
- const [portfolioTaxes,setPortfolioTaxes]=useState("0");
- const [tradeDate,setTradeDate]=useState(today());
- const [eventType,setEventType]=useState("earnings");
- const [eventDate,setEventDate]=useState(today());
- const [eventSource,setEventSource]=useState("");
- const [epsEstimate,setEpsEstimate]=useState("");
- const [epsActual,setEpsActual]=useState("");
- const [dividendAmount,setDividendAmount]=useState("");
- const [dividendCurrency,setDividendCurrency]=useState("EUR");
- const [eventTicker,setEventTicker]=useState("");
- const [loaded,setLoaded]=useState(false);
- const [marketTicker,setMarketTicker]=useState("AAPL");
-  const [marketRows,setMarketRows]=useState([]);
- const [marketHistory,setMarketHistory]=useState([]);
- const [backtestResult,setBacktestResult]=useState(null);
- const [backtestError,setBacktestError]=useState("");
- const [initialCapital,setInitialCapital]=useState("10000");
- const [feeBps,setFeeBps]=useState("0");
- const [commissionPreset,setCommissionPreset]=useState("US");
- const [fixedFee,setFixedFee]=useState(String(FINECO_DEFAULT_FEES.USD));
- const [buyTaxBps,setBuyTaxBps]=useState("0");
- const [slippageBps,setSlippageBps]=useState("5");
- const [marketIndicators,setMarketIndicators]=useState(null);
- const [marketError,setMarketError]=useState("");
- const [marketLoading,setMarketLoading]=useState(false);
- const [marketUsage,setMarketUsage]=useState(()=>getAlphaVantageUsage());
-  const [macroRows,setMacroRows]=useState([]);
- const [macroError,setMacroError]=useState("");
- const [macroLoading,setMacroLoading]=useState(false);
- const darkClass=dark?"bg-slate-950 text-slate-100":"bg-slate-50 text-slate-900";
- const card=dark?"bg-slate-900 border-slate-700":"bg-white border-slate-200";
- const muted=dark?"text-slate-400":"text-slate-500";
- useEffect(()=>{try{const saved=JSON.parse(localStorage.getItem(STORE)||"null");if(saved&&typeof saved==="object")setData({...initial(),...saved});}catch{}setLoaded(true);},[]);
- useEffect(()=>{if(loaded){try{localStorage.setItem(STORE,JSON.stringify(data));}catch{setError("Memoria locale non disponibile: esporta i dati prima di chiudere la sessione.");}}},[data,loaded]);
- const positions=useMemo(()=>{try{return {rows:buildPositions(data.trades),error:""};}catch(e){return {rows:[],error:e.message};}},[data.trades]);
- const autoEarnings=useMemo(()=>{const e=analysisData?.events?.earnings;if(!e?.nextDate||!analysisData?.quote?.ticker)return [];try{return [{...normalizeEarningsEvent({symbol:analysisData.quote.ticker,date:e.nextDate,epsEstimate:e.epsEstimate,revenueEstimate:e.revenueEstimate,source:analysisData.events.source||"Yahoo Finance",status:"unconfirmed"}),origin:"auto"}];}catch{return []; }},[analysisData]);
- const events=useMemo(()=>buildCorporateCalendar({earnings:[...autoEarnings,...data.earnings],dividends:data.dividends}),[autoEarnings,data.earnings,data.dividends]);
- const macroRegime=useMemo(()=>classifyMacroRegime(macroRows),[macroRows]);
- const addTrade=(e)=>{e.preventDefault();setError("");setPortfolioNotice("");
-  try{
-   const number=(value,label)=>{const n=Number(String(value).trim().replace(",","."));if(!String(value).trim()||!Number.isFinite(n))throw new Error(label+": inserisci un numero valido");return n;};
-   const trade={id:globalThis.crypto?.randomUUID?.()??String(Date.now())+"-"+Math.random(),symbol:ticker.trim().toUpperCase(),side,quantity:number(quantity,"Quantità"),price:number(price,"Prezzo"),currency,date:tradeDate,fees:number(fees,"Commissioni"),taxes:number(portfolioTaxes,"Imposte")};
-   const next=[...data.trades,trade];buildPositions(next);
-   localStorage.setItem(STORE,JSON.stringify({...data,trades:next}));
-   setData(prev=>({...prev,trades:next}));setTicker("");setPrice("");setPortfolioTaxes("0");
-   setPortfolioNotice("Movimento registrato e salvato sul dispositivo.");
-  }catch(err){setError("Movimento non registrato: "+err.message);}
- };
- const addEvent=(e)=>{e.preventDefault();setError("");try{if(!eventSource.trim()||!eventTicker.trim())throw new Error("Titolo e fonte del dato sono obbligatori");if(eventType==="earnings"){const event=normalizeEarningsEvent({symbol:eventTicker,date:eventDate,epsEstimate:epsEstimate===""?null:Number(epsEstimate),epsActual:epsActual===""?null:Number(epsActual),source:eventSource.trim(),status:"unconfirmed"});setData({...data,earnings:[...data.earnings,event]});}else{const event=normalizeDividend({symbol:eventTicker,amount:Number(dividendAmount),currency:dividendCurrency,exDate:eventDate,source:eventSource.trim(),status:"unconfirmed"});setData({...data,dividends:[...data.dividends,event]});}setEventTicker("");setEventSource("");setEpsEstimate("");setEpsActual("");setDividendAmount("");}catch(err){setError(err.message);}};
- const removeTrade=(id)=>setData({...data,trades:data.trades.filter(t=>t.id!==id)});
- const loadMarketHistory=async(e)=>{e.preventDefault();setMarketError("");setMarketLoading(true);try{const result=await loadAlphaVantageDaily({symbol:marketTicker.trim().toUpperCase(),apiKey:getApiKey("alphavantage")});setMarketRows(result.rows.slice(-10).reverse());setMarketHistory(result.rows);setBacktestResult(null);setBacktestError("");const closes=result.rows.map(x=>x.close);setMarketIndicators({sma20:sma(closes,20),sma50:sma(closes,50),ema20:ema(closes,20),rsi14:rsi(closes,14),observations:closes.length,asOf:result.rows.at(-1)?.date??null});setMarketUsage(getAlphaVantageUsage());}catch(err){setMarketError(err.message);setMarketUsage(getAlphaVantageUsage());}finally{setMarketLoading(false);}};
- const runBacktest=()=>{setBacktestError("");setBacktestResult(null);try{const signals=buildSmaCrossSignals(marketHistory,20,50);const result=runLongOnlyBacktest({bars:marketHistory.map(({date,close})=>({date,close})),signals,initialCapital:Number(initialCapital),feeBps:Number(feeBps),fixedFee:Number(fixedFee),buyTaxBps:Number(buyTaxBps),slippageBps:Number(slippageBps)});const equity=result.curve.map(x=>x.equity);const returns=equity.slice(1).map((v,i)=>v/equity[i]-1);setBacktestResult({...result,risk:analyzeRisk({returns,equityCurve:equity})});}catch(err){setBacktestError(err.message);}};
- const loadMacro=async(e)=>{e.preventDefault();if(macroLoading)return;setMacroError("");setMacroLoading(true);
- const series=[
-  {id:"FEDFUNDS",label:"Fed Funds rate",unit:"%"},
-  {id:"CPIAUCSL",label:"US CPI index",unit:"index"},
-  {id:"PCEPI",label:"US PCE price index",unit:"index"},
-  {id:"DGS10",label:"US Treasury 10Y",unit:"%"},
-  {id:"DGS2",label:"US Treasury 2Y",unit:"%"},
-  {id:"T10Y2Y",label:"US 10Y–2Y spread",unit:"%"},
-  {id:"VIXCLS",label:"VIX volatility",unit:"index"},
-  {id:"BAMLH0A0HYM2",label:"US high-yield spread",unit:"%"},
-  {id:"DCOILWTICO",label:"WTI crude oil",unit:"USD/barrel"},
-  {id:"IRLTLT01ITM156N",label:"Italy 10Y government yield (OECD historical)",unit:"%"},
-  {id:"IRLTLT01DEM156N",label:"Germany 10Y government yield (OECD historical)",unit:"%"},
-  {id:"EXR.D.USD.EUR.SP00.A",label:"ECB USD per EUR",unit:"USD/EUR",provider:"ECB",flowRef:"EXR",seriesKey:"D.USD.EUR.SP00.A"},
-  {id:"FM.D.U2.EUR.4F.KR.DFR.LEV",label:"ECB deposit facility rate",unit:"%",provider:"ECB",flowRef:"FM",seriesKey:"D.U2.EUR.4F.KR.DFR.LEV"}
- ];
- const rows=[];
- try{
-  const key=getApiKey("fred");
-  for(const item of series){
-   try{
-    if(item.provider!=="ECB"&&!key){rows.push({...item,status:"error",error:"Chiave FRED mancante: apri Impostazioni API"});continue;}
-    const observations=item.provider==="ECB"
-      ?await loadEcbSeries({flowRef:item.flowRef,seriesKey:item.seriesKey})
-      :await loadFredObservations({seriesId:item.id,apiKey:key});
-    const latest=observations.at(-1);
-    rows.push({...item,...(latest??{}),status:latest?"ok":"empty"});
-   }catch(error){
-    rows.push({...item,status:"error",error:error?.message||"Errore provider"});
-   }
-   setMacroRows([...rows]);
-  }
-  const it=rows.find(x=>x.id==="IRLTLT01ITM156N"),de=rows.find(x=>x.id==="IRLTLT01DEM156N");
-  if(it?.status==="ok"&&de?.status==="ok"&&it.date===de.date)
-   rows.push({id:"BTP_BUND_PROXY",label:"Spread 10Y Italia-Germania (OECD storico)",unit:"pp",value:it.value-de.value,date:it.date,source:"FRED/OECD",status:"ok"});
-  setMacroRows([...rows]);
-  const failed=rows.filter(x=>x.status==="error").length;
-  if(failed)setMacroError(`${failed} indicatori non disponibili. Leggi il motivo riportato sotto ciascuna serie; i dati mancanti non sono considerati nei calcoli.`);
- }finally{setMacroLoading(false);}
+const KEY = "aa2_fair_value_watchlist_v1";
+const cleanSymbol = (value) => String(value ?? "").trim().toUpperCase();
+const validSymbol = (symbol) => /^[A-Z0-9][A-Z0-9.^:_-]{0,29}$/.test(symbol);
+const csvEscape = (value) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
+const decodeCsv = (text) => {
+ const lines = String(text).replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean);
+ if (lines[0]?.trim() !== '"symbol"') throw new Error("Formato non riconosciuto: usa un CSV esportato dalla watchlist.");
+ const symbols = lines.slice(1).map((line) => {
+  if (!/^"(?:[^"]|"")*"$/.test(line)) throw new Error("Riga CSV non valida.");
+  return cleanSymbol(line.slice(1,-1).replace(/""/g,'"'));
+ });
+ if (!symbols.every(validSymbol) || new Set(symbols).size !== symbols.length || symbols.length > 200)
+  throw new Error("Ticker non validi, duplicati o oltre il limite di 200 titoli.");
+ return symbols;
 };
- const importTradesCsv=async(e)=>{
-  const file=e.target.files?.[0];if(!file)return;
-  setError("");setPortfolioNotice("");
+const download = (name, text) => {
+ const url = URL.createObjectURL(new Blob([text], {type:"text/csv;charset=utf-8"}));
+ const link = document.createElement("a");link.href=url;link.download=name;document.body.appendChild(link);link.click();link.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+
+export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},analysisData=null}){
+ const [symbols,setSymbols] = useState([]);
+ const [input,setInput] = useState("");
+ const [tab,setTab] = useState("valuation");
+ const [loaded,setLoaded] = useState(false);
+ const [error,setError] = useState("");
+ const [notice,setNotice] = useState("");
+ const current = cleanSymbol(analysisData?.quote?.ticker || analysisData?.quote?.symbol);
+ const muted = dark?"text-slate-400":"text-slate-500";
+ const card = dark?"bg-slate-900 border-slate-700":"bg-white border-slate-200";
+ useEffect(()=>{
   try{
-   const text=await file.text();
-   const trades=parseTradeCsv(text);
-   if(!trades.length)throw new Error("Il CSV non contiene movimenti.");
-   buildPositions(trades);
-   if(data.trades.length&&!window.confirm("Sostituire tutti i "+data.trades.length+" movimenti attuali con i "+trades.length+" movimenti del backup CSV? Esporta prima un backup se necessario."))return;
-   const next={...data,trades};
-   localStorage.setItem(STORE,JSON.stringify(next));
-   setData(next);
-   setPortfolioNotice("Backup CSV ripristinato: "+trades.length+" movimenti. I movimenti precedenti sono stati sostituiti.");
+   const saved=JSON.parse(localStorage.getItem(KEY)||"[]");
+   if(Array.isArray(saved))setSymbols(saved.filter(validSymbol).slice(0,200));
+  }catch{setError("Impossibile leggere la watchlist salvata.");}
+  setLoaded(true);
+ },[]);
+ const persist=(next)=>{
+  localStorage.setItem(KEY,JSON.stringify(next));
+  setSymbols(next);
+ };
+ const add=(e)=>{
+  e.preventDefault();setError("");setNotice("");
+  const symbol=cleanSymbol(input);
+  if(!validSymbol(symbol)){setError("Inserisci un ticker valido, per esempio ENI.MI oppure AAPL.");return;}
+  if(symbols.includes(symbol)){setError("Questo titolo è già nella watchlist.");return;}
+  if(symbols.length>=200){setError("Limite massimo di 200 titoli.");return;}
+  try{persist([...symbols,symbol]);setInput("");setNotice(symbol+" aggiunto alla watchlist.");}
+  catch{setError("Salvataggio locale non disponibile.");}
+ };
+ const remove=(symbol)=>{
+  setError("");setNotice("");
+  try{persist(symbols.filter(x=>x!==symbol));setNotice(symbol+" rimosso.");}
+  catch{setError("Impossibile salvare la modifica.");}
+ };
+ const exportCsv=()=>download("watchlist-fair-value.csv",["symbol",...symbols.map(csvEscape)].map((line,i)=>i===0?'"symbol"':line).join("\r\n")+"\r\n");
+ const importCsv=async(e)=>{
+  const file=e.target.files?.[0];if(!file)return;
+  setError("");setNotice("");
+  try{
+   const incoming=decodeCsv(await file.text());
+   if(symbols.length&&!window.confirm("Sostituire la watchlist attuale con "+incoming.length+" titoli del CSV?"))return;
+   persist(incoming);setNotice("Watchlist ripristinata: "+incoming.length+" titoli.");
   }catch(err){setError("Ripristino CSV non riuscito: "+err.message);}
   finally{e.target.value="";}
  };
- const exportTradesCsv=()=>{const blob=new Blob([serializeTradesCsv(data.trades)],{type:"text/csv;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="movimenti-portafoglio-"+today()+".csv";a.click();URL.revokeObjectURL(url);};
- const exportBackup=()=>{const blob=new Blob([JSON.stringify({schemaVersion:1,exportedAt:new Date().toISOString(),data},null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="analizzatore-azionario-backup-"+today()+".json";a.click();URL.revokeObjectURL(url);};
- const importBackup=(e)=>{const file=e.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(String(reader.result));const incoming=parsed?.data??parsed;if(!incoming||!Array.isArray(incoming.trades)||!Array.isArray(incoming.earnings)||!Array.isArray(incoming.dividends))throw new Error("Formato backup non riconosciuto");buildPositions(incoming.trades);incoming.earnings.forEach(normalizeEarningsEvent);incoming.dividends.forEach(normalizeDividend);setData(incoming);setError("Backup importato. Verifica i dati e conserva anche una copia del file originale.");}catch(err){setError("Importazione non riuscita: "+err.message);}finally{e.target.value="";}};reader.onerror=()=>setError("Impossibile leggere il file selezionato.");reader.readAsText(file);};
- const removeEvent=(index)=>{const item=events[index];if(!item)return;const key=item.type==="earnings"?"earnings":"dividends";const list=data[key];const match=list.findIndex(x=>x===item.payload);if(match>=0)setData({...data,[key]:list.filter((_,i)=>i!==match)});};
- const tabButton=(id,label,Icon)=><button onClick={()=>setTab(id)} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium ${tab===id?"bg-emerald-600 text-white":card+" border"}`}><Icon size={16}/>{label}</button>;
- return <div className={`workspace-shell min-h-screen ${darkClass} ${dark?"theme-dark":"theme-light"}`}><div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-5">
-  <div className="workspace-header flex items-center justify-between gap-3"><div className="flex items-center gap-3"><img src="/icon.svg" alt="" className="workspace-brand-icon"/><div><div className="text-xs uppercase tracking-wider text-emerald-500 font-bold">Versione 2.0 · workspace</div><h1 className="text-2xl font-bold">Console finanziaria</h1><p className={`text-sm ${muted}`}>Portafoglio, mercati, macroeconomia e rischio · dati locali</p></div></div><div className="flex flex-wrap gap-2"><button onClick={onSettings} className={`rounded-lg border px-3 py-2 flex gap-2 items-center text-sm ${card}`} aria-label="Apri impostazioni API">Impostazioni API</button><button onClick={onBack} className={`rounded-lg border px-3 py-2 flex gap-2 items-center text-sm ${card}`}><ArrowLeft size={16}/>Analisi titolo</button></div></div>
-  <div className="flex flex-wrap gap-2">{tabButton("portfolio","Portafoglio",Wallet)}{tabButton("market","Mercati",LineChart)}{tabButton("macro","Macro",LineChart)}{tabButton("calendar","Earnings & dividendi",CalendarDays)}{tabButton("quality","Qualità dati",ShieldCheck)}{tabButton("valuation","Fair Value",LineChart)}{tabButton("backtest","Backtest",LineChart)}</div>
-  {error&&<div role="alert" className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm flex gap-2"><AlertTriangle size={17}/>{error}</div>}
-  {tab==="valuation"&&<FairValuePanel dark={dark} analysisData={analysisData}/>}
-  {tab==="backtest"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}>
-   <div><h2 className="text-lg font-semibold">Backtest SMA 20/50</h2><p className={`text-xs ${muted}`}>Simulazione long-only sullo storico daily. Segnale alla chiusura di t, eseguito alla chiusura di t+1. Preset Fineco per operatività non frequente: USA 12,95 USD per eseguito; Italia 19,00 EUR per eseguito. La Tobin Tax è separata e va selezionata solo se applicabile allo strumento.</p></div>
-   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-    <label className="text-xs space-y-1">Mercato / profilo commissioni<select value={commissionPreset} onChange={e=>{const v=e.target.value;setCommissionPreset(v);setFixedFee(String(v==="US"?FINECO_DEFAULT_FEES.USD:v==="IT"?FINECO_DEFAULT_FEES.EUR:0));setBuyTaxBps("0");setBacktestResult(null);}} className="w-full rounded-lg border p-2 bg-transparent text-sm"><option value="US">USA · USD 12,95</option><option value="IT">Italia · EUR 19,00</option><option value="CUSTOM">Personalizzato</option></select></label>
-    <label className="text-xs space-y-1">Capitale iniziale ({commissionPreset==="IT"?"EUR":"USD"}; minimo {formatItalianInteger(MIN_INVESTMENT_NOTIONAL)} + costi)<input type="number" min={minimumCapitalForOrder({fixedFee:Number(fixedFee),feeBps:Number(feeBps),buyTaxBps:Number(buyTaxBps)})} step="any" value={initialCapital} onChange={e=>{setInitialCapital(e.target.value);setBacktestResult(null);}} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">Commissione fissa per eseguito ({commissionPreset==="US"?"USD":commissionPreset==="IT"?"EUR":"valuta titolo"})<input type="number" min="0" step="0.01" value={fixedFee} onChange={e=>{setFixedFee(e.target.value);setBacktestResult(null);}} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">Tobin Tax acquisto<select value={buyTaxBps} disabled={commissionPreset!=="IT"} onChange={e=>{setBuyTaxBps(e.target.value);setBacktestResult(null);}} className="w-full rounded-lg border p-2 bg-transparent text-sm disabled:opacity-40"><option value="0">Non applicata / non dovuta</option><option value={String(ITALIAN_FTT_BPS_2026.REGULATED)}>Italia · mercato regolamentato/MTF · 0,20%</option><option value={String(ITALIAN_FTT_BPS_2026.OTC)}>Italia · fuori mercato · 0,40%</option></select></label>
-    <p className={`col-span-full text-xs ${muted}`}>Dal 1° gennaio 2026 le aliquote sono 0,20% su mercati regolamentati/MTF e 0,40% fuori mercato. L’imposta riguarda in via generale gli acquisti di azioni emesse da società residenti in Italia; per le quotate conta la capitalizzazione media di novembre dell’anno precedente (soglia 500 milioni di euro). ETF/ETC e obbligazioni sono esclusi; esistono ulteriori esenzioni. L’imposta è sul saldo netto giornaliero per singolo titolo. Verifica sempre l’addebito Fineco: qui è una stima semplificata sul singolo acquisto, senza netting né verifica automatica dell’emittente.</p>
-    <label className="text-xs space-y-1">Commissione variabile (bps)<input type="number" min="0" step="1" value={feeBps} onChange={e=>{setFeeBps(e.target.value);setBacktestResult(null);}} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">Slippage per lato (bps)<input type="number" min="0" step="1" value={slippageBps} onChange={e=>{setSlippageBps(e.target.value);setBacktestResult(null);}} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-   </div>
-   <p className={`text-xs ${muted}`}>Serie caricata: {marketTicker} · {marketHistory.length} barre daily · ultima osservazione {marketHistory.at(-1)?.date||"n.d."}. Il backtest addebita la commissione fissa a ogni eseguito e, se selezionata, la Tobin Tax solo sull’acquisto. Investimento lordo minimo per ogni acquisto: {MIN_INVESTMENT_NOTIONAL.toLocaleString("it-IT")} nella valuta selezionata; il capitale deve coprire anche commissioni e imposte.</p>
-   <button type="button" disabled={marketHistory.length<50} onClick={runBacktest} className="rounded-lg bg-emerald-600 text-white px-4 py-2 text-sm disabled:opacity-40">Esegui backtest</button>
-   {backtestError&&<p role="alert" className="text-sm text-red-500">{backtestError}</p>}
-   {backtestResult&&<div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-    {[[ "Valore finale",money(backtestResult.finalValue,commissionPreset==="IT"?"EUR":"USD") ],[ "Rendimento totale",(backtestResult.totalReturn*100).toFixed(2)+"%" ],[ "CAGR",backtestResult.cagr===null?"n.d.":(backtestResult.cagr*100).toFixed(2)+"%" ],[ "Max drawdown",(backtestResult.maxDrawdown*100).toFixed(2)+"%" ],[ "Volatilità annualizzata",backtestResult.annualizedVolatility===null?"n.d.":(backtestResult.annualizedVolatility*100).toFixed(2)+"%" ],[ "Sharpe (rf=0)",backtestResult.risk?.sharpe===null||backtestResult.risk?.sharpe===undefined?"n.d.":backtestResult.risk.sharpe.toFixed(2) ],[ "Sortino (rf=0)",backtestResult.risk?.sortino===null||backtestResult.risk?.sortino===undefined?"n.d.":backtestResult.risk.sortino.toFixed(2) ],[ "Operazioni",String(backtestResult.tradeCount) ],[ "Commissioni totali",money(backtestResult.totalCommission,commissionPreset==="IT"?"EUR":"USD") ],[ "Tobin Tax stimata",money(backtestResult.totalTransactionTax,commissionPreset==="IT"?"EUR":"USD") ]].map(([label,value])=><div key={label} className="rounded-lg border border-slate-500/20 p-3"><div className={`text-xs ${muted}`}>{label}</div><div className="font-semibold text-lg">{value}</div></div>)}
+ return <div className={`workspace-shell min-h-screen ${dark?"bg-slate-950 text-slate-100 theme-dark":"bg-slate-50 text-slate-900 theme-light"}`}>
+  <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-5">
+   <header className="flex flex-wrap justify-between items-center gap-3">
+    <div className="flex items-center gap-3"><img src="/icon.svg" alt="" className="workspace-brand-icon"/><div><div className="text-xs uppercase tracking-wider text-emerald-500 font-bold">Analisi azionaria</div><h1 className="text-2xl font-bold">Fair Value + Watchlist</h1><p className={`text-xs ${muted}`}>Solo valutazione e titoli da seguire</p></div></div>
+    <div className="flex gap-2"><button type="button" onClick={onSettings} className={`rounded-lg border px-3 py-2 text-sm ${card}`}>Impostazioni API</button><button type="button" onClick={onBack} className={`rounded-lg border px-3 py-2 flex gap-2 items-center text-sm ${card}`}><ArrowLeft size={16}/>Analisi titolo</button></div>
+   </header>
+   <nav className="flex gap-2" aria-label="Sezioni"><button type="button" onClick={()=>setTab("valuation")} className={`rounded-lg px-4 py-2 text-sm ${tab==="valuation"?"bg-emerald-600 text-white":card+" border"}`}>Fair Value</button><button type="button" onClick={()=>setTab("watchlist")} className={`rounded-lg px-4 py-2 text-sm ${tab==="watchlist"?"bg-emerald-600 text-white":card+" border"}`}>Watchlist ({symbols.length})</button></nav>
+   {error&&<div role="alert" className="rounded-lg border border-amber-500/50 p-3 text-sm flex gap-2"><AlertTriangle size={17}/>{error}</div>}
+   {notice&&<div role="status" className="rounded-lg border border-emerald-500/50 p-3 text-sm">{notice}</div>}
+   {tab==="valuation"&&<div className="space-y-3">
+    <p className={`text-sm ${muted}`}>Il Fair Value utilizza i dati del titolo analizzato e le ipotesi che inserisci. Verifica sempre data e fonte: non è una quotazione in tempo reale.</p>
+    {current&&<button type="button" onClick={()=>{setInput(current);setTab("watchlist");}} className="rounded-lg border px-3 py-2 text-sm flex gap-2 items-center"><Plus size={15}/>Aggiungi {current} alla watchlist</button>}
+    <FairValuePanel key={current||"no-symbol"} dark={dark} analysisData={analysisData}/>
    </div>}
-   <p className={`text-xs ${muted}`}>Limiti essenziali: strategia SMA 20/50 semplificata; nessun benchmark, dividendo, split, FX, imposte, costi specifici dell’intermediario o titoli delistati. Dati non point-in-time: restano possibili survivorship bias e differenze di qualità del feed. Non usare il risultato come previsione o prova di rendimento futuro.</p>
-  </section>}
-  {tab==="market"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}><div><h2 className="text-lg font-semibold">Prezzi storici giornalieri</h2><p className={`text-xs ${muted}`}>Provider Alpha Vantage · dati daily, non realtime. Il piano gratuito ha limiti di chiamata e copertura; il risultato dipende dal mercato e dal ticker supportato.</p></div>
-   <form onSubmit={loadMarketHistory} className="grid grid-cols-1 sm:grid-cols-3 gap-3"><label className="text-xs space-y-1 sm:col-span-2">Ticker<input required value={marketTicker} onChange={e=>setMarketTicker(e.target.value.toUpperCase())} className="w-full rounded-lg border p-2 bg-transparent text-sm" placeholder="AAPL"/></label><button disabled={marketLoading} className="rounded-lg bg-emerald-600 text-white p-2 flex items-center justify-center gap-2 text-sm disabled:opacity-50"><RefreshCw size={16}/>{marketLoading?"Caricamento…":"Aggiorna storico"}</button></form>
-   <p className={`text-xs ${muted}`}>Richieste registrate oggi su questo browser: {marketUsage} / 25. La chiave viene letta dalle impostazioni API centralizzate della schermata principale, su questo dispositivo. Non usare questa modalità in una distribuzione pubblica multiutente.</p>
-   {marketError&&<p className="text-sm text-red-500">{marketError}</p>}
-   {marketIndicators&&<div className="grid grid-cols-2 sm:grid-cols-4 gap-2">{[["SMA 20",marketIndicators.sma20],["SMA 50",marketIndicators.sma50],["EMA 20",marketIndicators.ema20],["RSI 14",marketIndicators.rsi14]].map(([label,value])=><div key={label} className="rounded-lg border border-slate-500/20 p-3"><div className={`text-xs ${muted}`}>{label}</div><div className="text-lg font-semibold">{value==null?"n.d.":value.toFixed(2)}</div></div>)}</div>}
-   {marketIndicators&&<p className={`text-xs ${muted}`}>Indicatori calcolati localmente su {marketIndicators.observations} chiusure giornaliere, ultimo dato {marketIndicators.asOf}. Sono descrittivi, non segnali automatici.</p>}
-   {marketRows.length>0&&<div className="overflow-x-auto"><table className="w-full text-sm"><thead className={muted}><tr className="text-left border-b"><th className="py-2">Data</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th></tr></thead><tbody>{marketRows.map(r=><tr key={r.date} className="border-b border-slate-500/20"><td className="py-2">{r.date}</td><td>{r.open}</td><td>{r.high}</td><td>{r.low}</td><td className="font-semibold">{r.close}</td><td>{r.volume.toLocaleString("it-IT")}</td></tr>)}</tbody></table></div>}
-   <p className={`text-xs ${muted}`}>I prezzi sono chiusure giornaliere. Prima di usarli per un'analisi verifica data, borsa, valuta e disponibilità del simbolo presso il provider. Nessun prezzo viene automaticamente attribuito al portafoglio.</p>
-  </section>}
-  {tab==="portfolio"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}><div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="text-lg font-semibold">Registro movimenti</h2><p className={`text-xs ${muted}`}>Inserisci acquisti e vendite manualmente. I movimenti sono salvati sul dispositivo. Esporta un backup CSV e reimporta esclusivamente il CSV generato da questa app; il formato Investing.com non è supportato.</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={exportTradesCsv} className="rounded-lg border px-3 py-2 text-xs flex items-center gap-2"><Download size={14}/>Esporta CSV</button><label className="rounded-lg border px-3 py-2 text-xs flex items-center gap-2 cursor-pointer"><Upload size={14}/>Ripristina CSV<input type="file" accept=".csv,text/csv" className="hidden" onChange={importTradesCsv}/></label></div></div>
-   <p className={`text-xs ${muted}`}>Inserisci il controvalore effettivo di ogni operazione, anche inferiore a 5.000 EUR/USD. Le commissioni proposte sono indicative e modificabili: verifica quelle realmente addebitate dal broker.</p>
-   {portfolioNotice&&<p role="status" className="rounded-lg border border-emerald-500/50 p-3 text-sm text-emerald-500">{portfolioNotice}</p>}
-   <form onSubmit={addTrade} className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-    <label className="text-xs space-y-1">Ticker<input required value={ticker} onChange={e=>setTicker(e.target.value)} placeholder="es. ENI.MI" className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">Operazione<select value={side} onChange={e=>setSide(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"><option value="BUY">Acquisto</option><option value="SELL">Vendita</option></select></label>
-    <label className="text-xs space-y-1">Quantità<input required type="text" inputMode="decimal" value={quantity} onChange={e=>setQuantity(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">Prezzo unitario<input required type="text" inputMode="decimal" value={price} onChange={e=>setPrice(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">Valuta<select value={currency} onChange={e=>{const v=e.target.value;setCurrency(v);setFees(String(defaultFinecoFee(v)));}} className="w-full rounded-lg border p-2 bg-transparent text-sm"><option>EUR</option><option>USD</option><option>GBP</option><option>CHF</option><option>JPY</option></select></label>
-    <label className="text-xs space-y-1">Commissioni broker (preset indicativi: EUR 19,00 / USD 12,95)<input type="text" inputMode="decimal" value={fees} onChange={e=>setFees(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">Imposte (inserisci l’addebito effettivo)<input type="text" inputMode="decimal" value={portfolioTaxes} onChange={e=>setPortfolioTaxes(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">Data<input type="date" required value={tradeDate} onChange={e=>setTradeDate(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <button className="self-end rounded-lg bg-emerald-600 text-white p-2 flex items-center justify-center gap-2 text-sm"><Plus size={16}/>Registra</button>
-   </form>
-   {positions.error&&<p className="text-sm text-red-500">{positions.error}</p>}
-   <div className="overflow-x-auto"><table className="w-full text-sm"><thead className={muted}><tr className="text-left border-b"><th className="py-2">Titolo</th><th>Quantità</th><th>Costo medio</th><th>P&L realizzato</th><th>Commissioni</th><th>Imposte</th><th></th></tr></thead><tbody>{positions.rows.map(p=><tr key={p.symbol} className="border-b border-slate-500/20"><td className="py-2 font-semibold">{p.symbol}</td><td>{p.quantity}</td><td>{money(p.averageCost,p.currency)}</td><td className={p.realizedPnl>=0?"text-emerald-500":"text-red-500"}>{money(p.realizedPnl,p.currency)}</td><td>{money(p.feesPaid,p.currency)}</td><td>{money(p.taxesPaid,p.currency)}</td><td><button title="Rimuovi ultimo movimento del titolo" onClick={()=>{const ix=data.trades.map((t,i)=>t.symbol.toUpperCase()===p.symbol?i:-1).filter(i=>i>=0).at(-1);if(ix!=null)setData({...data,trades:data.trades.filter((_,i)=>i!==ix)});}} className="text-red-500"><Trash2 size={15}/></button></td></tr>)}</tbody></table></div>
-   {!positions.rows.length&&<p className={`text-sm ${muted}`}>Nessun movimento registrato.</p>}
-  </section>}
-  {tab==="macro"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}><div><h2 className="text-lg font-semibold">Indicatori macro globali</h2><p className={`text-xs ${muted}`}>Serie ufficiali FRED ed ECB Data Portal. Le frequenze e i ritardi di pubblicazione variano per indicatore; non sono quotazioni intraday.</p></div>
-   <form onSubmit={loadMacro} className="flex flex-wrap items-center gap-3"><button disabled={macroLoading} className="rounded-lg bg-emerald-600 text-white p-2 flex items-center justify-center gap-2 text-sm disabled:opacity-50"><RefreshCw size={16}/>{macroLoading?"Caricamento…":"Aggiorna indicatori"}</button></form>
-   <p className={`text-xs ${muted}`}>Undici serie FRED aggiornate in sequenza (serve la tua chiave gratuita); il cambio EUR/USD proviene da ECB Data Portal senza chiave. Le frequenze e i ritardi variano per serie. La chiave FRED viene letta dalle impostazioni API centralizzate della schermata principale, su questo dispositivo. Non usare questa modalità per una distribuzione pubblica multiutente.</p>
-   {macroError&&<p className="text-sm text-red-500">{macroError}</p>}
-   <div className="grid sm:grid-cols-2 gap-3">{macroRows.map(r=><div key={r.id} className="rounded-lg border border-slate-500/20 p-3"><div className="text-xs font-semibold">{r.label} <span className={muted}>({r.id})</span></div><div className="text-xl font-semibold mt-1">{r.status==="ok"?r.value.toLocaleString("it-IT",{maximumFractionDigits:3})+" "+r.unit:"n.d."}</div><div className={`text-xs ${muted}`}>{r.status==="ok"?"Fonte: "+(r.source||r.provider||"FRED")+" · Osservazione: "+r.date:r.error||"Nessuna osservazione"}</div></div>)}</div>
-   <div className="rounded-lg border border-slate-500/20 p-3 space-y-2"><div className="font-semibold text-sm">Regime di rischio USA (descrittivo)</div><div className="text-sm font-bold">{macroRegime.status==="insufficient_data"?"Dati insufficienti":macroRegime.regime==="risk_off"?"Risk-off":macroRegime.regime==="cautious"?"Cauto":macroRegime.regime==="risk_on"?"Risk-on":"Non classificato"}</div><div className={`text-xs ${muted}`}>{macroRegime.available}/{macroRegime.required} indicatori core aggiornati</div>{macroRegime.drivers.map((d,i)=><div key={i} className={`text-xs ${muted}`}>• {d}</div>)}</div>
-   <p className={`text-xs ${muted}`}>Quadro macro descrittivo, non previsivo né calibrato: mancano inflazione armonizzata UE, spread BTP-Bund e validazione statistica. Il regime non genera segnali d'investimento né probabilità di scenario.</p>
-  </section>}
-  {tab==="calendar"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}><div><h2 className="text-lg font-semibold">Calendario societario</h2><p className={`text-xs ${muted}`}>Aggiungi date da fonti ufficiali o confermate. Gli eventi inseriti manualmente restano non confermati finché non li verifichi.</p></div>
-   <div className="rounded-lg border border-slate-500/20 p-3 space-y-2"><div className="font-semibold text-sm">Earnings & Dividend Intelligence automatica</div>{analysisData?.events?<>
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
-     <div><div className={muted+" text-xs"}>Prossimi risultati</div><b>{analysisData.events.earnings?.nextDate||"n.d."}</b></div>
-     <div><div className={muted+" text-xs"}>EPS stimato</div><b>{Number.isFinite(analysisData.events.earnings?.epsEstimate)?analysisData.events.earnings.epsEstimate:"n.d."}</b></div>
-     <div><div className={muted+" text-xs"}>Ricavi stimati</div><b>{Number.isFinite(analysisData.events.earnings?.revenueEstimate)?money(analysisData.events.earnings.revenueEstimate,analysisData.quote?.currency||"EUR"):"n.d."}</b></div>
-     <div><div className={muted+" text-xs"}>Dividend yield</div><b>{Number.isFinite(analysisData.events.dividends?.yield)?analysisData.events.dividends.yield.toFixed(2)+"%":"n.d."}</b></div>
-     <div><div className={muted+" text-xs"}>Payout ratio</div><b>{Number.isFinite(analysisData.events.dividends?.payoutRatio)?analysisData.events.dividends.payoutRatio.toFixed(1)+"%":"n.d."}</b></div>
-     <div><div className={muted+" text-xs"}>Ex-dividend date</div><b>{analysisData.events.dividends?.exDividendDate||"n.d."}</b></div>
-    </div>
-    <div className={"text-xs "+muted}>Fonte: {analysisData.events.source||"n.d."} · aggiornato {analysisData.events.asOf||"n.d."}. Feed non ufficiale: verifica sempre il calendario investor relations.</div>
-    {(analysisData.events.earnings?.history||[]).length>0&&<div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="border-b text-left"><th className="py-1">Quarter</th><th>EPS actual</th><th>EPS estimate</th><th>Surprise</th></tr></thead><tbody>{analysisData.events.earnings.history.slice(-4).map((h,i)=><tr key={h.quarter||i} className="border-b border-slate-500/10"><td className="py-1">{h.quarter||"n.d."}</td><td>{h.epsActual??"n.d."}</td><td>{h.epsEstimate??"n.d."}</td><td>{Number.isFinite(h.surprisePct)?(h.surprisePct*100).toFixed(1)+"%":"n.d."}</td></tr>)}</tbody></table></div>}
-   </>:<p className={muted+" text-sm"}>Nessun dato automatico disponibile: prima analizza un titolo nella schermata principale oppure verifica il ticker e la disponibilità del provider.</p>}</div>
-   <form onSubmit={addEvent} className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-    <label className="text-xs space-y-1">Tipo<select value={eventType} onChange={e=>setEventType(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"><option value="earnings">Risultati</option><option value="dividend">Dividendo</option></select></label>
-    <label className="text-xs space-y-1">Ticker<input required value={eventTicker} onChange={e=>setEventTicker(e.target.value)} placeholder="es. AAPL" className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">{eventType==="earnings"?"Data risultati":"Ex-dividend date"}<input required type="date" value={eventDate} onChange={e=>setEventDate(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    {eventType==="earnings"?<><label className="text-xs space-y-1">EPS stimato (opzionale)<input type="number" step="any" value={epsEstimate} onChange={e=>setEpsEstimate(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label><label className="text-xs space-y-1">EPS effettivo (opzionale)<input type="number" step="any" value={epsActual} onChange={e=>setEpsActual(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label></>:<><label className="text-xs space-y-1">Dividendo per azione<input required type="number" min="0" step="any" value={dividendAmount} onChange={e=>setDividendAmount(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label><label className="text-xs space-y-1">Valuta<select value={dividendCurrency} onChange={e=>setDividendCurrency(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"><option>EUR</option><option>USD</option><option>GBP</option><option>CHF</option></select></label></>}
-    <label className="text-xs space-y-1 col-span-2 sm:col-span-1">Fonte (URL o riferimento)<input required value={eventSource} onChange={e=>setEventSource(e.target.value)} placeholder="comunicato societario / URL" className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <button className="rounded-lg bg-emerald-600 text-white p-2 flex items-center justify-center gap-2 text-sm"><Plus size={16}/>Aggiungi evento</button>
-   </form>
-   <div className="space-y-2">{events.map((ev,i)=><div key={ev.type+ev.symbol+ev.date+i} className="flex items-center justify-between gap-3 rounded-lg border border-slate-500/20 p-3 text-sm"><div><div className="font-semibold">{ev.symbol} · {ev.type==="earnings"?"Risultati":"Ex-dividendo"}</div><div className={muted}>{ev.date} · {ev.source} · <span className="text-amber-500">non confermato</span></div></div>{ev.payload?.origin!=="auto"&&<button onClick={()=>removeEvent(i)} className="text-red-500"><Trash2 size={15}/></button>}</div>)}{!events.length&&<p className={muted+" text-sm"}>Nessun evento registrato.</p>}</div>
-  </section>}
-  {tab==="quality"&&<section className={`rounded-xl border p-4 space-y-3 ${card}`}>
-   <h2 className="text-lg font-semibold">Data Quality & Provenienza</h2>
-   {analysisScore?.readiness?<div className={`rounded-lg border p-3 ${analysisScore.readiness.ready?"border-emerald-500/30":"border-amber-500/40"}`}><div className="font-semibold text-sm">{analysisScore.readiness.ready?"Gate analisi superato":"Giudizio sospeso: dati insufficienti"}</div><div className={`text-xs ${muted}`}>Fattori disponibili: {analysisScore.readiness.coverage.availableFactors}/6 · Bilanci utilizzabili: {analysisScore.readiness.coverage.annualStatements} · Multipli comparabili: {analysisScore.readiness.coverage.comparableMultiples}</div>{analysisScore.readiness.reasons.map((reason,i)=><div key={i} className="text-xs text-amber-500">• {reason}</div>)}</div>:<p className={`text-sm ${muted}`}>Analizza prima un titolo nella schermata principale per vedere i controlli di qualità fondamentali.</p>}
-   <div className="grid sm:grid-cols-2 gap-2 text-sm">
-    <div className="rounded-lg border border-slate-500/20 p-3"><b>Prezzi / storico</b><div className={muted}>{analysisData?.quote?.source||"n.d."} · {analysisData?.quote?.asOf||"n.d."}</div><div className={muted}>{analysisData?.quote?.history?.length||0} osservazioni settimanali · {analysisData?.quote?.currency||"valuta n.d."}</div></div>
-    <div className="rounded-lg border border-slate-500/20 p-3"><b>Bilanci</b><div className={muted}>{analysisData?.fin?.source||"n.d."} · ultimo report {analysisData?.fin?.lastReportDate||"n.d."}</div><div className={muted}>{analysisData?.fin?.annual?.length||0} esercizi · aggiornato {analysisData?.fin?.isLatest===true?"sì":analysisData?.fin?.isLatest===false?"no":"n.d."}</div></div>
-    <div className="rounded-lg border border-slate-500/20 p-3"><b>Multipli / valutazione</b><div className={muted}>{analysisData?.val?.source||"n.d."} · {analysisData?.val?.asOf||"n.d."}</div><div className={muted}>{analysisData?.val?.metrics?.length||0} multipli disponibili</div></div>
-    <div className="rounded-lg border border-slate-500/20 p-3"><b>Earnings / dividendi</b><div className={muted}>{analysisData?.events?.source||"n.d."} · {analysisData?.events?.asOf||"n.d."}</div><div className={muted}>Feed non ufficiale: verifica con investor relations.</div></div>
-    <div className="rounded-lg border border-slate-500/20 p-3"><b>Macro</b><div className={muted}>{macroRows.filter(x=>x.status==="ok").length}/{macroRows.length} osservazioni caricate</div><div className={muted}>Regime USA: {macroRegime.status==="ok"?macroRegime.regime:"dati insufficienti"}</div></div>
-    <div className="rounded-lg border border-slate-500/20 p-3"><b>Storico backtest</b><div className={muted}>Alpha Vantage · {marketHistory.length} barre daily</div><div className={muted}>Ultima osservazione {marketHistory.at(-1)?.date||"n.d."}</div></div>
-   </div>
-   <p className={`text-xs ${muted}`}>Yahoo Finance non è un feed ufficiale né realtime. FRED ed ECB hanno frequenze/ritardi diversi. Alpha Vantage dipende dal piano e dalla copertura. SEC XBRL non è ancora collegato alla UI. I dati restano locali nel browser/dispositivo: esporta backup regolarmente.</p>
-  </section>}
-  <div className={`flex flex-wrap items-center gap-2 border-t pt-4 ${muted}`}><button onClick={exportBackup} className="rounded-lg border px-3 py-2 text-xs flex items-center gap-2"><Download size={14}/>Esporta backup</button><label className="rounded-lg border px-3 py-2 text-xs flex items-center gap-2 cursor-pointer"><Upload size={14}/>Importa backup<input type="file" accept="application/json,.json" onChange={importBackup} className="hidden"/></label><span className="text-xs">Workspace locale · conserva una copia del backup.</span></div>
-  <p className={`text-xs ${muted}`}>Workspace 2.0 sperimentale · dati giornalieri, non realtime · non è consulenza finanziaria.</p>
- </div></div>;
+   {tab==="watchlist"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}>
+    <div><h2 className="text-lg font-semibold">Watchlist essenziale</h2><p className={`text-xs ${muted}`}>Salva i ticker da seguire. La watchlist non recupera quotazioni automaticamente e non rappresenta un portafoglio con quantità o prezzi di acquisto. Per analizzare un titolo, torna ad Analisi titolo.</p></div>
+    <form onSubmit={add} className="flex flex-wrap gap-2"><input aria-label="Ticker" value={input} onChange={e=>setInput(e.target.value)} placeholder="es. AAPL o ENI.MI" className="min-w-0 flex-1 rounded-lg border bg-transparent p-2 text-sm" required/><button type="submit" className="rounded-lg bg-emerald-600 text-white px-4 py-2 flex items-center gap-2 text-sm"><Plus size={16}/>Aggiungi</button></form>
+    <div className="flex flex-wrap gap-2"><button type="button" onClick={exportCsv} className="rounded-lg border px-3 py-2 text-sm flex gap-2 items-center"><Download size={15}/>Esporta CSV</button><label className="rounded-lg border px-3 py-2 text-sm flex gap-2 items-center cursor-pointer"><Upload size={15}/>Ripristina CSV<input type="file" accept=".csv,text/csv" className="hidden" onChange={importCsv}/></label></div>
+    {!loaded?<p className={muted}>Caricamento watchlist…</p>:symbols.length===0?<p className={muted}>Nessun titolo salvato.</p>:<ul className="divide-y divide-slate-500/20">{symbols.map(symbol=><li key={symbol} className="flex items-center justify-between py-3 gap-2"><span className="font-semibold">{symbol}</span><button type="button" onClick={()=>remove(symbol)} aria-label={"Rimuovi "+symbol} className="text-red-500 flex gap-1 items-center text-sm"><Trash2 size={16}/>Rimuovi</button></li>)}</ul>}
+    <p className={`text-xs ${muted}`}>Il backup CSV contiene soltanto i ticker della watchlist. I precedenti movimenti di portafoglio restano nei dati locali della vecchia console, ma non sono mostrati qui.</p>
+   </section>}
+  </div>
+ </div>;
 }
