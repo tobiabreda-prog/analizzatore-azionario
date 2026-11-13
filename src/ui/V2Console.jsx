@@ -45,7 +45,8 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null}){
  const [backtestResult,setBacktestResult]=useState(null);
  const [backtestError,setBacktestError]=useState("");
  const [initialCapital,setInitialCapital]=useState("10000");
- const [feeBps,setFeeBps]=useState("10");
+ const [feeBps,setFeeBps]=useState("0");
+ const [fixedFee,setFixedFee]=useState("9.95");
  const [slippageBps,setSlippageBps]=useState("5");
  const [marketIndicators,setMarketIndicators]=useState(null);
  const [marketError,setMarketError]=useState("");
@@ -67,7 +68,7 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null}){
  const addEvent=(e)=>{e.preventDefault();setError("");try{if(!eventSource.trim()||!eventTicker.trim())throw new Error("Titolo e fonte del dato sono obbligatori");if(eventType==="earnings"){const event=normalizeEarningsEvent({symbol:eventTicker,date:eventDate,epsEstimate:epsEstimate===""?null:Number(epsEstimate),epsActual:epsActual===""?null:Number(epsActual),source:eventSource.trim(),status:"unconfirmed"});setData({...data,earnings:[...data.earnings,event]});}else{const event=normalizeDividend({symbol:eventTicker,amount:Number(dividendAmount),currency:dividendCurrency,exDate:eventDate,source:eventSource.trim(),status:"unconfirmed"});setData({...data,dividends:[...data.dividends,event]});}setEventTicker("");setEventSource("");setEpsEstimate("");setEpsActual("");setDividendAmount("");}catch(err){setError(err.message);}};
  const removeTrade=(id)=>setData({...data,trades:data.trades.filter(t=>t.id!==id)});
  const loadMarketHistory=async(e)=>{e.preventDefault();setMarketError("");setMarketLoading(true);try{const result=await loadAlphaVantageDaily({symbol:marketTicker.trim().toUpperCase(),apiKey:marketApiKey});setMarketRows(result.rows.slice(-10).reverse());setMarketHistory(result.rows);setBacktestResult(null);setBacktestError("");const closes=result.rows.map(x=>x.close);setMarketIndicators({sma20:sma(closes,20),sma50:sma(closes,50),ema20:ema(closes,20),rsi14:rsi(closes,14),observations:closes.length,asOf:result.rows.at(-1)?.date??null});setMarketUsage(getAlphaVantageUsage());}catch(err){setMarketError(err.message);setMarketUsage(getAlphaVantageUsage());}finally{setMarketLoading(false);}};
- const runBacktest=()=>{setBacktestError("");setBacktestResult(null);try{const signals=buildSmaCrossSignals(marketHistory,20,50);const result=runLongOnlyBacktest({bars:marketHistory.map(({date,close})=>({date,close})),signals,initialCapital:Number(initialCapital),feeBps:Number(feeBps),slippageBps:Number(slippageBps)});const equity=result.curve.map(x=>x.equity);const returns=equity.slice(1).map((v,i)=>v/equity[i]-1);setBacktestResult({...result,risk:analyzeRisk({returns,equityCurve:equity})});}catch(err){setBacktestError(err.message);}};
+ const runBacktest=()=>{setBacktestError("");setBacktestResult(null);try{const signals=buildSmaCrossSignals(marketHistory,20,50);const result=runLongOnlyBacktest({bars:marketHistory.map(({date,close})=>({date,close})),signals,initialCapital:Number(initialCapital),feeBps:Number(feeBps),fixedFee:Number(fixedFee),slippageBps:Number(slippageBps)});const equity=result.curve.map(x=>x.equity);const returns=equity.slice(1).map((v,i)=>v/equity[i]-1);setBacktestResult({...result,risk:analyzeRisk({returns,equityCurve:equity})});}catch(err){setBacktestError(err.message);}};
  const loadMacro=async(e)=>{e.preventDefault();setMacroError("");setMacroLoading(true);const series=[
   {id:"FEDFUNDS",label:"Fed Funds rate",unit:"%"},
   {id:"CPIAUCSL",label:"US CPI index",unit:"index"},
@@ -96,10 +97,11 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null}){
   {error&&<div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm flex gap-2"><AlertTriangle size={17}/>{error}</div>}
   {tab==="valuation"&&<FairValuePanel dark={dark} analysisData={analysisData}/>}
   {tab==="backtest"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}>
-   <div><h2 className="text-lg font-semibold">Backtest SMA 20/50</h2><p className={`text-xs ${muted}`}>Simulazione long-only sullo storico daily caricato nella scheda Mercati. Il segnale usa la chiusura del giorno t ed è eseguito alla chiusura del giorno successivo.</p></div>
+   <div><h2 className="text-lg font-semibold">Backtest SMA 20/50</h2><p className={`text-xs ${muted}`}>Simulazione long-only sullo storico daily caricato nella scheda Mercati. Il segnale usa la chiusura del giorno t ed è eseguito alla chiusura del giorno successivo. Commissione fissa preimpostata a 9,95 per lato: modifica in base a mercato e intermediario.</p></div>
    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-    <label className="text-xs space-y-1">Capitale iniziale<input type="number" min="1" step="any" value={initialCapital} onChange={e=>setInitialCapital(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">Commissione per lato (bps)<input type="number" min="0" step="1" value={feeBps} onChange={e=>setFeeBps(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
+    <label className="text-xs space-y-1">Capitale iniziale<input type="number" min="500" step="any" value={initialCapital} onChange={e=>setInitialCapital(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
+    <label className="text-xs space-y-1">Commissione fissa per lato (valuta titolo)<input type="number" min="0" step="0.01" value={fixedFee} onChange={e=>setFixedFee(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
+    <label className="text-xs space-y-1">Commissione variabile (bps)<input type="number" min="0" step="1" value={feeBps} onChange={e=>setFeeBps(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
     <label className="text-xs space-y-1">Slippage per lato (bps)<input type="number" min="0" step="1" value={slippageBps} onChange={e=>setSlippageBps(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
    </div>
    <p className={`text-xs ${muted}`}>Serie caricata: {marketTicker} · {marketHistory.length} barre daily · ultima osservazione {marketHistory.at(-1)?.date||"n.d."}. Prima carica lo storico nella scheda Mercati (Alpha Vantage).</p>
