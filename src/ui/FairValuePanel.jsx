@@ -1,28 +1,29 @@
 import { useMemo, useState } from "react";
 import { valueScenarios } from "../modules/fair-value.js";
 
-const parseList=(value)=>value.split(/[;,]/).map(x=>Number(x.trim())).filter((x)=>x!==0||x.trim?.()==="0");
 const num=(v)=>v.trim()===""?null:Number(v);
 const pct=(v)=>Number(v)/100;
 const money=(v)=>Number.isFinite(v)?v.toLocaleString("it-IT",{maximumFractionDigits:2}):"n.d.";
 
-export default function FairValuePanel({dark=false}){
- const [fcf,setFcf]=useState("");
+export default function FairValuePanel({dark=false,analysisData=null}){
+ const latestFcf=analysisData?.fin?.annual?.filter(x=>Number.isFinite(x.fcf)&&x.fcf>0).at(-1)?.fcf;
+ const [fcfBase,setFcfBase]=useState(()=>Number.isFinite(latestFcf)?String(latestFcf):"");
+ const [fcfGrowth,setFcfGrowth]=useState("5");
  const [wacc,setWacc]=useState("9");
  const [growth,setGrowth]=useState("2.5");
- const [netDebt,setNetDebt]=useState("");
+ const [netDebt,setNetDebt]=useState(()=>Number.isFinite(analysisData?.fin?.balance?.netDebt)?String(analysisData.fin.balance.netDebt):"");
  const [shares,setShares]=useState("");
- const [price,setPrice]=useState("");
+ const [price,setPrice]=useState(()=>Number.isFinite(analysisData?.quote?.price)?String(analysisData.quote.price):"");
  const [result,setResult]=useState(null);
  const [error,setError]=useState("");
- const [busy,setBusy]=useState(false);
  const muted=dark?"text-slate-400":"text-slate-500";
  const field=dark?"bg-slate-950 border-slate-700":"bg-white border-slate-300";
  const calculate=(e)=>{
   e.preventDefault();setError("");setResult(null);
   try{
-   const flows=fcf.split(/[;,]/).map(x=>Number(x.trim()));
-   if(flows.length<3||flows.some(x=>!Number.isFinite(x))||flows.at(-1)<=0)throw new Error("Inserisci almeno 3 FCF previsionali, con ultimo valore positivo, separati da virgola.");
+   const baseFcf=num(fcfBase),growthRate=pct(fcfGrowth);
+   if(!Number.isFinite(baseFcf)||baseFcf<=0||!Number.isFinite(growthRate)||growthRate<=-1)throw new Error("Inserisci un FCF base positivo e una crescita FCF superiore a -100%.");
+   const flows=Array.from({length:5},(_,i)=>baseFcf*(1+growthRate)**(i+1));
    const w=pct(wacc),g=pct(growth),debt=num(netDebt),diluted=num(shares),current=num(price);
    if(!Number.isFinite(w)||!Number.isFinite(g)||w<=0||g<0||w<=g)throw new Error("WACC deve essere positivo e superiore alla crescita terminale.");
    if(debt===null||!Number.isFinite(debt)||diluted===null||!Number.isFinite(diluted)||diluted<=0)throw new Error("Debito netto e azioni diluite sono obbligatori e devono essere coerenti nelle unità.");
@@ -35,9 +36,10 @@ export default function FairValuePanel({dark=false}){
   }catch(err){setError(err.message);}
  };
  return <section className="rounded-xl border p-4 space-y-4">
-  <div><h2 className="text-lg font-semibold">Fair Value · DCF a scenari</h2><p className={`text-xs ${muted}`}>Modello trasparente con ipotesi modificabili. Inserisci FCF annuali previsionali, debito netto e azioni diluite nella stessa unità monetaria (es. milioni). Non vengono inventati dati mancanti.</p></div>
+  <div><h2 className="text-lg font-semibold">Fair Value · DCF a scenari</h2><p className={`text-xs ${muted}`}>Modello trasparente con ipotesi modificabili. Il FCF e il debito netto possono essere precompilati dall’analisi del titolo; verifica periodo, valuta e unità. Le proiezioni a 5 anni derivano dalla crescita FCF da te scelta. Le azioni diluite vanno inserite manualmente in milioni.</p></div>
   <form onSubmit={calculate} className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-   <label className="col-span-2 sm:col-span-3 text-xs space-y-1">Free cash flow previsionali (milioni, dal primo al quinto anno)<input required value={fcf} onChange={e=>setFcf(e.target.value)} placeholder="es. 850, 920, 1000, 1080, 1160" className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
+   <label className="text-xs space-y-1">FCF ultimo esercizio (milioni)<input required type="number" min="0.000001" step="any" value={fcfBase} onChange={e=>setFcfBase(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
+   <label className="text-xs space-y-1">Crescita FCF annua (%)<input required type="number" step="0.1" value={fcfGrowth} onChange={e=>setFcfGrowth(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
    <label className="text-xs space-y-1">WACC (%)<input required type="number" step="0.1" value={wacc} onChange={e=>setWacc(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
    <label className="text-xs space-y-1">Crescita terminale (%)<input required type="number" step="0.1" value={growth} onChange={e=>setGrowth(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
    <label className="text-xs space-y-1">Debito netto (milioni)<input required type="number" step="any" value={netDebt} onChange={e=>setNetDebt(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
