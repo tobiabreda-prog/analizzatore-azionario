@@ -20,8 +20,17 @@ function cleanSymbol(symbol, exchange) {
   return US_EXCHANGES.has(String(exchange ?? "").trim().toUpperCase()) ? s.replace(/\.(O|K|N|A|P|OQ|PK)$/, "") : s;
 }
 
+// Riconosce il file dalla struttura reale, anche con BOM, CRLF e intestazioni lunghe.
 export function isInvestingCsv(text) {
-  return typeof text === "string" && /^\s*"?(Riepilogo Posizioni Aperte|Posizioni aperte|Posizioni chiuse)"?\s*$/im.test(text);
+  if (typeof text !== "string" || !text.trim()) return false;
+  const sections = new Set(["riepilogo posizioni aperte", "posizioni aperte", "posizioni chiuse"]);
+  return text.replace(/^\\uFEFF/, "").split(/\\r?\\n/).some((line) => {
+    if (!line.trim()) return false;
+    try {
+      const fields = splitLine(line, ",");
+      return fields.length === 1 && sections.has(norm(fields[0]));
+    } catch { return false; }
+  });
 }
 
 export function parseInvestingCsv(text) {

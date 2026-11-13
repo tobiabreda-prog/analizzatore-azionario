@@ -29,6 +29,17 @@ jobs:
         with:
           path: ~/.android/debug.keystore
           key: analizzatore-debug-keystore-v1
+      - name: Verify existing signing identity before build
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEYSTORE="$HOME/.android/debug.keystore"
+          if [ ! -s "$KEYSTORE" ]; then
+            echo "::error::Chiave di firma Android precedente non disponibile. Build interrotta per evitare una APK incompatibile che richiederebbe la disinstallazione e perderebbe le chiavi API locali."
+            echo "::error::Ripristinare la stessa debug.keystore dal backup sicuro o configurare una chiave di release persistente."
+            exit 1
+          fi
+          keytool -list -v -keystore "$KEYSTORE" -storepass android -alias androiddebugkey -keypass android | grep -E 'SHA256:|Alias name:' | head -n 2
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Build web app
