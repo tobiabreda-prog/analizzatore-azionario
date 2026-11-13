@@ -131,6 +131,7 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
    const trades=parseTradeCsv(text);
    if(!trades.length)throw new Error("Il CSV non contiene movimenti.");
    buildPositions(trades);
+   if(data.trades.length&&!window.confirm("Sostituire tutti i "+data.trades.length+" movimenti attuali con i "+trades.length+" movimenti del backup CSV? Esporta prima un backup se necessario."))return;
    const next={...data,trades};
    localStorage.setItem(STORE,JSON.stringify(next));
    setData(next);
