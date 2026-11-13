@@ -72,4 +72,27 @@ describe("import CSV Investing.com", () => {
   it("non rompe l'import CSV standard", () => {
     expect(parseTradeCsv("date;symbol;side;quantity;price;currency\n2026-01-01;ABC;BUY;2;10;EUR")[0].symbol).toBe("ABC");
   });
+
+  it("riconcilia il riepilogo delle quantità senza trasformarlo in lotti senza data", () => {
+    const parsed = parseInvestingCsv(SAMPLE);
+    expect(parsed.summaryPositions).toBe(1);
+    expect(parsed.openLots).toBe(5);
+    expect(parsed.trades.filter((t) => t.symbol === "PRY.MI")).toHaveLength(1);
+  });
+  it("blocca un riepilogo incoerente senza alterare le quantità dei movimenti", () => {
+    const inconsistent = SAMPLE.replace('"48.00000000","103,8500"', '"49.00000000","103,8500"');
+    expect(() => parseInvestingCsv(inconsistent)).toThrow(/Riepilogo non riconciliato per PRY.MI/);
+  });
+  it("segnala che un riepilogo privo di date non può diventare uno storico di acquisti", () => {
+    const summaryOnly = ['"Riepilogo Posizioni Aperte"','"","Nome","Simbolo","Borsa","Tipo","Quantità","Prezzo Medio"','"","Test","TEST.MI","BIT","Compra","3.00000000","10,50"'].join("\r\n");
+    expect(() => parseInvestingCsv(summaryOnly)).toThrow(/non contiene date di acquisto/);
+  });
+  it("riconosce un export UTF-8 BOM con quantità, decimali italiani e posizioni chiuse", () => {
+    const sample = "\uFEFF" + SAMPLE;
+    const parsed = parseInvestingCsv(sample);
+    expect(parsed.trades).toHaveLength(13);
+    expect(parsed.trades.find(t => t.symbol === "PRY.MI").price).toBe(103.85);
+    expect(parsed.trades.every(t => /^\\d{4}-\\d{2}-\\d{2}$/.test(t.date))).toBe(true);
+  });
+
 });
