@@ -1,10 +1,12 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { ComposedChart, LineChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell } from "recharts";
-import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, loadCorporateEvents, diagnostics } from "./data.js";
+import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, loadCorporateEvents, loadPeerValuation, diagnostics } from "./data.js";
 import { printReport } from "./report.js";
 import { assessAnalysisReadiness } from "./core/analysis-gate.js";
 import V2Console from "./ui/V2Console.jsx";
 import { getApiKey, saveApiKey } from "./services/api-settings.js";
+import { readAnalysisSection, readAnalysisSnapshot, writeAnalysisSection, analysisFingerprint } from "./services/analysis-cache.js";
+import { listGeminiModels } from "./services/gemini-models.js";
 import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key, Printer } from "lucide-react";
 
 const POPULAR_TICKERS = [
@@ -31,69 +33,37 @@ function parseJSON(txt) {
   } catch (e) { return null; }
 }
 
-async function callGeminiAPI(systemInstruction, userPrompt) {
-  let apiKey = "";
-  apiKey = getApiKey("gemini");
-  if (!apiKey) throw new Error("Chiave API Gemini mancante: inseriscila con l'icona della chiave in alto.");
-  const model = "gemini-3.5-flash-lite";
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-  
-  const payload = {
-    contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-    systemInstruction: { parts: [{ text: systemInstruction }] },
-    generationConfig: { responseMimeType: "application/json", temperature: 0.3, maxOutputTokens: 3072 }
+async function callGeminiAPI(systemInstruction,userPrompt) {
+  const apiKey=getApiKey("gemini");
+  if(!apiKey)throw new Error("Chiave Gemini mancante: inseriscila nelle impostazioni.");
+  const models=(await listGeminiModels(apiKey)).filter(m=>/flash/i.test(m.name)).slice(0,4);
+  if(!models.length)throw new Error("Nessun modello Gemini Flash disponibile per questa chiave.");
+  const payload={
+    contents:[{role:"user",parts:[{text:userPrompt}]}],
+    systemInstruction:{parts:[{text:systemInstruction}]},
+    generationConfig:{responseMimeType:"application/json",temperature:0.3,maxOutputTokens:3072}
   };
-
-  // Nessun Search grounding: Gemini interpreta solo i dati già verificati.
-
-  let delay = 1000;
-  let rateRetried = false;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  let lastError="Nessun modello compatibile.";
+  for(const model of models){
+    const url="https://generativelanguage.googleapis.com/v1beta/"+model.name+":generateContent";
+    let response;
     try {
-      const response = await fetch(apiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify(payload)
-      });
-
-      if (response.status === 429) {
-        const body = await response.text();
-        let msg = body;
-        try { msg = JSON.parse(body).error?.message || body; } catch (e) {}
-        const m = body.match(/"retryDelay":\s*"(\d+(?:\.\d+)?)s"/) || msg.match(/retry in (\d+(?:\.\d+)?)s/i);
-        const wait = m ? Math.ceil(parseFloat(m[1])) : null;
-        if (!rateRetried && wait != null && wait <= 65) {
-          rateRetried = true;
-          await new Promise((res) => setTimeout(res, (wait + 1) * 1000));
-          continue;
-        }
-        const e = new Error("Limite di richieste Google (429)" + (wait != null ? ` — riprova tra circa ${wait}s` : "") + ". Dettaglio: " + msg.slice(0, 400));
-        e.noRetry = true;
-        throw e;
-      }
-      if (!response.ok) {
-        throw new Error(`Errore HTTP ${response.status}: ${await response.text()}`);
-      }
-
-      const result = await response.json();
-      const candidate = result.candidates?.[0];
-      const text = candidate?.content?.parts?.[0]?.text;
-      
-      if (!text) {
-        throw new Error("Risposta vuota o non valida ricevuta dal modello.");
-      }
-
-      const parsed = parseJSON(text);
-      if (!parsed) {
-        throw new Error("Impossibile interpretare il JSON restituito.");
-      }
-      return parsed;
-    } catch (err) {
-      if (err.noRetry || attempt === 3 || /mancante|HTTP 40[0-3]/.test(err.message)) throw err;
-      await new Promise((res) => setTimeout(res, delay));
-      delay *= 2;
+      response=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},body:JSON.stringify(payload)});
+    }catch(e){throw new Error("Rete Gemini non raggiungibile: "+String(e.message||e));}
+    if(response.status===429)throw new Error("Quota Gemini esaurita (429): il report numerico rimane disponibile; riprova più tardi.");
+    if(!response.ok){
+      const detail=await response.json().catch(()=>({}));
+      lastError=model.name+": HTTP "+response.status+" "+String(detail.error?.message||"").slice(0,160);
+      if(response.status===400||response.status===404)continue;
+      throw new Error(lastError);
     }
+    const answer=await response.json();
+    const text=(answer.candidates?.[0]?.content?.parts||[]).map(p=>p.text||"").join("");
+    const parsed=parseJSON(text);
+    if(!parsed)throw new Error("JSON Gemini non interpretabile: report numerico non modificato.");
+    return parsed;
   }
+  throw new Error("Nessun modello Gemini utilizzabile: "+lastError);
 }
 
 const nf = (n, d = 2) => (n == null || isNaN(n) ? "n.d." : Number(n).toLocaleString("it-IT", { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -133,7 +103,7 @@ function rsi(a, n = 14) {
   return out;
 }
 
-const STEPS = ["Quotazioni e storico…", "Bilanci e multipli…", "Analisti e confronto con l'indice…", "Notizie e giudizio…"];
+const STEPS = ["Quotazioni e storico…", "Bilanci e multipli…"];
 const WEIGHTS = { "Trend tecnico": 0.2, Crescita: 0.2, Redditività: 0.15, "Solidità finanziaria": 0.15, Valutazione: 0.15, Sentiment: 0.15 };
 
 export function buildTech(q) {
@@ -244,20 +214,7 @@ function mergeNews(acc, nw) {
   };
 }
 
-// ---------- Memoria locale: stesso titolo entro 30 minuti = nessuna nuova richiesta ----------
-const CACHE_KEY = "an_cache_v3", CACHE_TTL = 30 * 60 * 1000;
-const cKey = (t) => t.trim().toUpperCase();
-function cacheRead() { try { return JSON.parse(localStorage.getItem(CACHE_KEY)) || {}; } catch (e) { return {}; } }
-function cacheGet(t) { const e = cacheRead()[cKey(t)]; return e && Date.now() - e.ts < CACHE_TTL ? e : null; }
-function cachePut(keys, data, warns) {
-  try {
-    const all = cacheRead(), ts = Date.now();
-    keys.forEach((k) => { all[cKey(k)] = { ts, data, warns }; });
-    const fresh = Object.entries(all).filter(([, e]) => ts - e.ts < CACHE_TTL).sort((x, y) => y[1].ts - x[1].ts).slice(0, 10);
-    localStorage.setItem(CACHE_KEY, JSON.stringify(Object.fromEntries(fresh)));
-  } catch (e) { /* memoria piena o non disponibile */ }
-}
-
+// Independent report cache lives in services/analysis-cache.js.
 export default function AnalizzatoreAzionario() {
   const [dark, setDark] = useState(() => {
     try { const t = localStorage.getItem("theme"); if (t === "dark" || t === "light") return t === "dark"; } catch (e) {}
@@ -282,6 +239,9 @@ export default function AnalizzatoreAzionario() {
     m.content = bg;
   }, [dark]);
   const [showV2, setShowV2] = useState(false);
+  const [workspaceTab, setWorkspaceTab] = useState("watchlist");
+  const [aiBusy, setAiBusy] = useState(false);
+  const requestId = useRef(0);
   const [input, setInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [cur, setCur] = useState("");
@@ -300,19 +260,14 @@ export default function AnalizzatoreAzionario() {
   const [testMsg, setTestMsg] = useState("");
   const [testing, setTesting] = useState(false);
   const testKey = async () => {
-    setTesting(true); setTestMsg("Verifica del modello gratuito in corso…");
+    setTesting(true);setTestMsg("Verifica dei modelli disponibili…");
     try {
-      const k = keyVal.trim();
-      if (!k) throw new Error("Inserisci prima la chiave Gemini.");
-      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent", {
-        method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": k },
-        body: JSON.stringify({ contents: [{ parts: [{ text: '{"ok":true}' }] }], generationConfig: { responseMimeType: "application/json", maxOutputTokens: 32 } })
-      });
-      const body = await r.text();
-      if (!r.ok) throw new Error("Gemini HTTP " + r.status + ": " + body.slice(0, 240));
-      setTestMsg("Chiave valida: gemini-3.5-flash-lite risponde correttamente. Il piano gratuito ha limiti di utilizzo.");
-    } catch (e) { setTestMsg("Test non riuscito: " + e.message); }
-    finally { setTesting(false); }
+      const k=keyVal.trim();
+      if(!k)throw new Error("Inserisci prima la chiave Gemini.");
+      const models=await listGeminiModels(k);
+      setTestMsg("Chiave riconosciuta: "+models.length+" modelli generateContent disponibili. L'accesso alla ricerca web e le quote si verificano durante la richiesta reale.");
+    }catch(e){setTestMsg("Test non riuscito: "+String(e.message||e));}
+    finally{setTesting(false);}
   };
   const [keyVal, setKeyVal] = useState(() => getApiKey("gemini"));
   const busy = step >= 0 && step < STEPS.length;
@@ -329,78 +284,136 @@ export default function AnalizzatoreAzionario() {
     return POPULAR_TICKERS.filter(item => item.ticker.toLowerCase().includes(q) || item.name.toLowerCase().includes(q)).slice(0, 5);
   }, [input]);
 
-  async function run(t, resume, force) {
-    const target = (t ?? input).trim(); if (!target || busy) return;
-    setShowSuggestions(false);
-    setCur(target); setErr(null);
-    setHist((h) => [target, ...h.filter((x) => x.toLowerCase() !== target.toLowerCase())].slice(0, 8));
-    if (!resume && !force) {
-      const hit = cacheGet(target);
-      if (hit) { setData(hit.data); setWarns(hit.warns || []); setCachedAt(hit.ts); setStep(STEPS.length); return; }
-    }
-    setCachedAt(null); setStep(0);
-    if (!resume) setData({});
-    const acc = resume ? { ...data } : {};
-    const w = [];
-    setWarns([]);
-    const avKey = getApiKey("alphavantage").trim();
-    const soft = async (fn, empty, label) => {
-      try { return await fn(); } catch (e) { w.push(`${label}: dati non disponibili (${e.message.slice(0, 80)})`); setWarns([...w]); return empty; }
+
+  async function run(t, resume=false, force=false) {
+    const target=(t??input).trim().toUpperCase();
+    if(!target)return;
+    // Stale requests may finish but must never overwrite another ticker.
+    const id=++requestId.current,active=()=>id===requestId.current;
+    setShowSuggestions(false);setInput(target);setCur(target);setErr(null);setAiBusy(false);
+    setHist(h=>[target,...h.filter(x=>x.toUpperCase()!==target)].slice(0,8));
+    const snapshot=readAnalysisSnapshot(target);
+    const acc={...snapshot.data};
+    const notices=new Map(snapshot.stale.map(k=>[k,"Dati "+k+" da cache non aggiornata: verificare la data originale."]));
+    const updateNotices=()=>{if(active())setWarns([...notices.values()]);};
+    const clearNotice=k=>{notices.delete(k);updateNotices();};
+    const warn=(k,msg)=>{notices.set(k,msg);updateNotices();};
+    const publish=()=>{if(active())setData({...acc});};
+    const put=(key,value,cacheSymbol=target)=>{
+      if(!active()||value===undefined||value===null)return;
+      acc[key]=value;
+      writeAnalysisSection(cacheSymbol,key,value);
+      clearNotice(key);publish();
+    };
+    setData({...acc});updateNotices();
+    setCachedAt(!force&&snapshot.fresh.includes("quote")&&snapshot.fresh.includes("fin")?(snapshot.timestamps.quote||null):null);
+    setStep(acc.quote&&acc.fin&&acc.val?STEPS.length:0);
+    const section=async(key,fetcher,cacheSymbol=target)=>{
+      const cached=!force?readAnalysisSection(cacheSymbol,key):null;
+      if(cached){acc[key]=cached.value;clearNotice(key);publish();return cached.value;}
+      try {
+        const value=await fetcher();
+        if(!active())return null;
+        if(value!==null&&value!==undefined)put(key,value,cacheSymbol);
+        return value;
+      } catch(e) {
+        if(!active())return null;
+        const old=readAnalysisSection(cacheSymbol,key,{allowStale:true});
+        if(old)acc[key]=old.value;else delete acc[key];
+        warn(key,key+": "+(old?"uso ultima copia salvata, ":"dati non disponibili, ")+String(e.message||e).slice(0,100));
+        publish();
+        return old?.value??null;
+      }
     };
     try {
-      if (!acc.quote) {
-        acc.quote = await loadQuote(target);
-        setData({ ...acc });
+      const quote=await section("quote",()=>loadQuote(target));
+      if(!active())return;
+      if(!quote||!quote.ticker)throw new Error("Quotazione non disponibile per "+target+". Controlla rete e ticker.");
+      const sym=quote.ticker;
+      if(sym!==target){
+        const canonical=readAnalysisSnapshot(sym);
+        for(const key of Object.keys(canonical.data))if(key!=="quote"&&!acc[key])acc[key]=canonical.data[key];
+        publish();
       }
-      const sym = acc.quote.ticker;
-      if (!acc.fin || !acc.val) {
-        setStep(1);
-        const r = await soft(() => loadFundamentals(sym), { fin: EMPTY_FIN(), val: EMPTY_VAL() }, "Bilanci e multipli");
-        acc.fin = r.fin; acc.val = r.val;
-        if (acc.val.marketCap && !acc.quote.marketCap) acc.quote = { ...acc.quote, marketCap: acc.val.marketCap };
-        setData({ ...acc });
-      }
-      if (acc.events === undefined) {
-        setStep(2);
-        acc.events = await soft(() => loadCorporateEvents(sym), null, "Calendario utili e dividendi");
-        setData({ ...acc });
-      }
-      if (!acc.an || acc.mkt === undefined) {
-        setStep(2);
-        const [an, mkt] = await Promise.all([
-          acc.an ? acc.an : soft(() => loadAnalysts(sym, "", avKey), EMPTY_AN(), "Analisti"),
-          acc.mkt !== undefined ? acc.mkt : soft(() => loadMarket(sym, acc.quote.history), null, "Confronto con l'indice"),
-        ]);
-        acc.an = an; acc.mkt = mkt;
-        setData({ ...acc });
-      }
-      setStep(3);
-      if (!acc.newsRaw) acc.newsRaw = await soft(() => loadNewsRaw(sym), [], "Notizie");
-      if (!acc.final || acc.final.failed) {
-        const S = computeScores(acc, buildTech(acc.quote));
-        if (!S.readiness.ready) {
-          acc.final = { failed: true, reason: S.readiness.reasons.join("; ") };
-          acc.news = mergeNews(acc, null);
-          w.push("Giudizio sospeso: qualità o copertura dei dati insufficiente.");
-          setWarns([...w]);
-        } else {
+      setStep(acc.fin&&acc.val?STEPS.length:1);
+      const fundamental=async()=>{
+        const cachedFin=!force?readAnalysisSection(sym,"fin"):null;
+        const cachedVal=!force?readAnalysisSection(sym,"val"):null;
+        if(cachedFin&&cachedVal){
+          acc.fin=cachedFin.value;acc.val=cachedVal.value;
+          clearNotice("fin");clearNotice("val");publish();return;
+        }
+        try {
+          const {fin,val}=await loadFundamentals(sym,{includePeers:false});
+          if(!active())return;
+          put("fin",fin,sym);put("val",val,sym);
+        } catch(e) {
+          if(!active())return;
+          warn("fin",(acc.fin&&acc.val?"Bilanci da cache precedente: ":"Bilanci non disponibili: ")+String(e.message||e).slice(0,100));
+        }
+      };
+      const core=fundamental();
+      // Optional requests start concurrently and update their own sections on completion.
+      const extras=[
+        section("events",()=>loadCorporateEvents(sym),sym),
+        section("an",()=>loadAnalysts(sym,"",getApiKey("alphavantage").trim()),sym),
+        section("mkt",()=>loadMarket(sym,quote.history),sym),
+        section("newsRaw",()=>loadNewsRaw(sym),sym),
+      ];
+      const peers=(async()=>{
+        const cached=!force?readAnalysisSection(sym,"peers"):null;
+        let peerData=cached?.value;
+        if(!peerData){
           try {
-            const out = await callGeminiAPI(SYSTEM_PROMPT, buildUserPrompt(acc, S, labelOf(S.overall)), false);
-            const { news: nw, ...fin } = out;
-            acc.final = fin; acc.news = mergeNews(acc, nw);
-          } catch (e) {
-            acc.final = { failed: true };
-            acc.news = mergeNews(acc, null);
-            w.push("Commento e notizie: Gemini non disponibile (" + e.message.slice(0, 120) + ")"); setWarns([...w]);
+            peerData=await loadPeerValuation(sym);
+            if(active()&&peerData)writeAnalysisSection(sym,"peers",peerData);
+          }catch(e){
+            if(active())warn("peers","Confronto settoriale non disponibile: "+String(e.message||e).slice(0,80));
+            return;
           }
         }
-        setData({ ...acc });
+        await core;
+        if(!active()||!peerData||!acc.val)return;
+        const metrics=(acc.val.metrics||[]).map(m=>({...m,sector:peerData.sector?.[m.k]??null}));
+        const source=String(acc.val.source||"Yahoo Finance").replace(/ \+ peer \(Yahoo\)/g,"");
+        const next={...acc.val,metrics,peers:peerData.peers||[],source:source+(peerData.peers?.length?" + peer (Yahoo)":"")};
+        put("val",next,sym);
+      })();
+      await core;
+      if(!active())return;
+      setStep(STEPS.length); // Report ready; optional data and Gemini continue separately.
+      await Promise.allSettled([...extras,peers]);
+      if(!active()||!acc.fin||!acc.val)return;
+      const S=computeScores(acc,buildTech(acc.quote));
+      if(!S.readiness.ready){
+        acc.final={failed:true,reason:S.readiness.reasons.join("; ")};
+        acc.news=mergeNews(acc,null);
+        warn("readiness","Giudizio AI sospeso: copertura o qualità dei dati insufficiente.");
+        publish();return;
       }
-      setStep(STEPS.length);
-      if (acc.final && !acc.final.failed) cachePut([target, sym], acc, w);
-    } catch (e) {
-      setErr(e.message === "NOT_FOUND" ? "Titolo non trovato. Controlla sigla o nome (es. AAPL, ENI.MI)." : "Errore nel recupero dei dati: " + e.message);
-      setStep(-1);
+      const fingerprint=analysisFingerprint(acc);
+      const saved=!force?readAnalysisSection(sym,"ai"):null;
+      if(saved?.value?.fingerprint===fingerprint){
+        acc.final=saved.value.final;acc.news=saved.value.news;publish();return;
+      }
+      setAiBusy(true);
+      try {
+        const out=await callGeminiAPI(SYSTEM_PROMPT,buildUserPrompt(acc,S,labelOf(S.overall)));
+        if(!active())return;
+        const {news:nw,...fin}=out;
+        acc.final=fin;acc.news=mergeNews(acc,nw);
+        writeAnalysisSection(sym,"ai",{fingerprint,final:acc.final,news:acc.news});
+        clearNotice("ai");publish();
+      }catch(e){
+        if(!active())return;
+        acc.final={failed:true};acc.news=mergeNews(acc,null);
+        warn("ai","Commento Gemini non disponibile: "+String(e.message||e).slice(0,130));
+        publish();
+      }finally{if(active())setAiBusy(false);}
+    }catch(e){
+      if(!active())return;
+      setErr(e.message==="NOT_FOUND"?"Titolo non trovato: verifica il ticker.":"Errore nel recupero dei dati: "+String(e.message||e));
+      setStep(-1);setAiBusy(false);
     }
   }
 
@@ -420,7 +433,9 @@ export default function AnalizzatoreAzionario() {
   const q = data.quote, f = data.fin, v = data.val, a = data.an, n = data.news, fi = data.final, mkt = data.mkt;
   const up = (x) => x != null && x >= 0;
 
-  const Card = ({ title, children, meta }) => (
+  // Keep report card component types stable across progressive updates.
+  // Otherwise every partial API response remounts ALL charts and inputs.
+  const Card = useMemo(() => ({ title, children, meta }) => (
     <section className={`app-card rounded-xl border p-4 ${th.card}`}>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h2 className="font-semibold text-base">{title}</h2>
@@ -428,8 +443,8 @@ export default function AnalizzatoreAzionario() {
       </div>
       {children}
     </section>
-  );
-  const Meta = ({ d, src, extra }) => {
+  ),[th.card]);
+  const Meta = useMemo(() => ({ d, src, extra }) => {
     const old = daysOld(d); const stale = extra ?? (old != null && old > 2);
     return (
       <div className={`flex flex-wrap items-center gap-1.5 text-xs ${th.mute}`}>
@@ -438,8 +453,10 @@ export default function AnalizzatoreAzionario() {
         {stale && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 font-medium flex items-center gap-1"><AlertTriangle size={11} />Dato non aggiornato</span>}
       </div>
     );
-  };
-  const Stat = ({ k, v, c }) => (<div className={`rounded-lg border p-2 ${th.card}`}><div className={`text-xs ${th.mute}`}>{k}</div><div className={`font-semibold ${c || ""}`}>{v}</div></div>);
+  },[th.mute]);
+  const Stat = useMemo(() => ({ k, v, c }) => (
+    <div className={`rounded-lg border p-2 ${th.card}`}><div className={`text-xs ${th.mute}`}>{k}</div><div className={`font-semibold ${c || ""}`}>{v}</div></div>
+  ),[th.card,th.mute]);
   const chartH = 190;
   const tip = {
     contentStyle: { background: dark ? "#0f172a" : "#ffffff", border: "1px solid " + (dark ? "#475569" : "#cbd5e1"), borderRadius: 8, fontSize: 12, color: dark ? "#f1f5f9" : "#0f172a" },
@@ -474,7 +491,7 @@ export default function AnalizzatoreAzionario() {
 
   const cfColor = (n) => (n == null || isNaN(n) ? "" : n > 0 ? "text-emerald-500" : n < 0 ? "text-red-500" : "");
 
-  if (showV2) return <V2Console onSelectSymbol={(symbol) => { setShowV2(false); setInput(symbol); run(symbol, false, false); }} dark={dark} onBack={() => setShowV2(false)} onSettings={() => { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); setShowKey(true); setShowV2(false); }} analysisData={data} analysisScore={S} />;
+  if (showV2) return <V2Console initialTab={workspaceTab} onSelectSymbol={(symbol) => { setShowV2(false); setInput(symbol); run(symbol, false, false); }} dark={dark} onBack={() => setShowV2(false)} onSettings={() => { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); setShowKey(true); setShowV2(false); }} analysisData={data} analysisScore={S} />;
 
   return (
     <div className={`app-shell min-h-screen ${th.bg} ${dark ? "theme-dark" : "theme-light"}`}>
@@ -489,7 +506,7 @@ export default function AnalizzatoreAzionario() {
             </div>
           </div>
           <div className="app-actions">
-            <button onClick={() => setShowV2(true)} className="app-action-button app-workspace-button" aria-label="Apri workspace 2.0"><TrendingUp size={16} /><span>Workspace 2.0</span></button>
+            <button onClick={() => {setWorkspaceTab("watchlist");setShowV2(true);}} className="app-action-button app-workspace-button" aria-label="Apri workspace 2.0"><TrendingUp size={16} /><span>Workspace 2.0</span></button>
             <button onClick={() => { if (!showKey) { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); } setShowKey(!showKey); }} className="app-action-button" aria-label="Impostazioni fonti dati"><Key size={16} /></button>
             <button onClick={() => { const nd = !dark; setDark(nd); setThemeFixed(true); try { localStorage.setItem("theme", nd ? "dark" : "light"); } catch (e) {} }} className="app-action-button" aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
           </div>
@@ -582,6 +599,12 @@ export default function AnalizzatoreAzionario() {
             {POPULAR_TICKERS.slice(0, 8).map((item) => <button type="button" key={item.ticker} onClick={() => { setInput(item.ticker); run(item.ticker); }} className="app-ticker-chip"><b>{item.ticker}</b><span>{item.name}</span></button>)}
           </div>
         )}
+        <nav aria-label="Navigazione rapida" className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => {setWorkspaceTab("watchlist");setShowV2(true);}} className={`px-3 py-2 rounded-lg border text-sm ${th.card}`}>Watchlist</button>
+          <button type="button" disabled={!q} onClick={() => {setWorkspaceTab("valuation");setShowV2(true);}} className={`px-3 py-2 rounded-lg border text-sm disabled:opacity-50 ${th.card}`}>Fair Value{q?.ticker?" · "+q.ticker:""}</button>
+          <span className={`self-center text-xs ${th.mute}`}>Report: {cur||"seleziona un ticker"}</span>
+        </nav>
+
         {hist.length > 0 && (
           <div className="flex flex-wrap gap-1.5 items-center text-xs">
             <span className={th.mute}>Recenti:</span>
@@ -595,6 +618,7 @@ export default function AnalizzatoreAzionario() {
             <div className={`h-2 rounded mt-2 overflow-hidden ${dark ? "bg-slate-800" : "bg-slate-200"}`}><div className="h-full bg-emerald-500 transition-all" style={{ width: `${((step + 0.5) / STEPS.length) * 100}%` }} /></div>
           </div>
         )}
+        {aiBusy && q && <p role="status" className={`rounded-lg border px-3 py-2 text-xs ${th.card}`}>Il report è consultabile. Il commento Gemini viene elaborato separatamente…</p>}
         {err && (
           <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-3 flex flex-wrap items-center gap-3 text-sm">
             <AlertTriangle className="text-red-500" size={18} /><span className="flex-1 min-w-0 break-words">{err}</span>
@@ -603,7 +627,7 @@ export default function AnalizzatoreAzionario() {
         )}
 
         {cachedAt && step === STEPS.length && (
-          <div className={`rounded-xl border p-2 text-xs flex items-center gap-2 ${th.card}`}><Clock size={13} />Dati salvati alle {new Date(cachedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}: nessuna nuova richiesta. Tocca "Aggiorna dati" per ricaricare.</div>
+          <div className={`rounded-xl border p-2 text-xs flex items-center gap-2 ${th.card}`}><Clock size={13} />Quotazione e bilanci disponibili nella cache locale (salvati alle {new Date(cachedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}). Gli altri dati vengono verificati separatamente.</div>
         )}
 
         {warns.length > 0 && (
