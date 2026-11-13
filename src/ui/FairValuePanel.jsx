@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { valueScenarios } from "../modules/fair-value.js";
+import { readAnalysisSection, writeAnalysisSection } from "../services/analysis-cache.js";
 import { researchWacc } from "../services/wacc-research.js";
 
 const num=(v)=>v.trim()===""?null:Number(v);
@@ -8,6 +9,8 @@ const money=(v,currency)=>{if(!Number.isFinite(v))return "n.d.";try{return curre
 
 export default function FairValuePanel({dark=false,analysisData=null}){
  const currency=analysisData?.quote?.currency||"";
+ const symbol=String(analysisData?.quote?.ticker||analysisData?.quote?.symbol||"").toUpperCase();
+ const savedWacc=useMemo(()=>readAnalysisSection(symbol,"wacc")?.value||null,[symbol]);
  const annual=useMemo(()=>[...(analysisData?.fin?.annual||[])].filter(x=>Number.isFinite(x?.y)).sort((a,b)=>a.y-b.y),[analysisData]);
  const latestAnnual=annual.at(-1);
  const latestFcfYear=latestAnnual?.y;
@@ -19,8 +22,9 @@ export default function FairValuePanel({dark=false,analysisData=null}){
  const debt=analysisData?.fin?.balance?.netDebt;
  const marketCap=analysisData?.quote?.marketCap??analysisData?.val?.marketCap;
  const quotePrice=analysisData?.quote?.price;
+ const reportedShares=analysisData?.fin?.balance?.dilutedShares;
  const impliedShares=Number.isFinite(marketCap)&&marketCap>0&&Number.isFinite(quotePrice)&&quotePrice>0?marketCap/quotePrice/1e6:null;
- const defaults={fcfBase:Number.isFinite(fcf)?String(fcf):"",fcfGrowth:String(Number(suggestedGrowth.toFixed(2))),wacc:"",growth:"2.5",netDebt:Number.isFinite(debt)?String(debt):"",shares:Number.isFinite(impliedShares)?String(Number(impliedShares.toFixed(4))):"",price:Number.isFinite(quotePrice)&&quotePrice>0?String(quotePrice):""};
+ const defaults={fcfBase:Number.isFinite(fcf)?String(fcf):"",fcfGrowth:String(Number(suggestedGrowth.toFixed(2))),wacc:Number.isFinite(savedWacc?.wacc)?String(savedWacc.wacc):"",growth:"2.5",netDebt:Number.isFinite(debt)?String(debt):"",shares:Number.isFinite(reportedShares)&&reportedShares>0?String(Number(reportedShares.toFixed(4))):"",price:Number.isFinite(quotePrice)&&quotePrice>0?String(quotePrice):""};
  const [overrides,setOverrides]=useState({});
  const fcfBase=overrides.fcfBase??defaults.fcfBase;
  const fcfGrowth=overrides.fcfGrowth??defaults.fcfGrowth;
@@ -54,7 +58,7 @@ export default function FairValuePanel({dark=false,analysisData=null}){
   const rounded=Number(value.toFixed(3));
   setWacc(String(rounded));setOfflineResult({wacc:rounded,ke});setWaccResearch(null);setResult(null);
  };
- const [waccResearch,setWaccResearch]=useState(null);
+ const [waccResearch,setWaccResearch]=useState(savedWacc);
  const [researchBusy,setResearchBusy]=useState(false);
  const [researchError,setResearchError]=useState("");
  const [result,setResult]=useState(null);
@@ -63,8 +67,8 @@ export default function FairValuePanel({dark=false,analysisData=null}){
  const runResearch=async()=>{
   setResearchBusy(true);setResearchError("");setWaccResearch(null);
   try{
-   const symbol=String(analysisData?.quote?.ticker||analysisData?.quote?.symbol||"").toUpperCase();
    const found=await researchWacc({symbol,currency});
+   writeAnalysisSection(symbol,"wacc",found);
    setWaccResearch(found);setOfflineResult(null);setWacc(String(found.wacc));setResult(null);
   }catch(e){setResearchError(e.message||"Ricerca WACC non riuscita.");}
   finally{setResearchBusy(false);}
@@ -90,9 +94,9 @@ export default function FairValuePanel({dark=false,analysisData=null}){
  };
  return <section className="rounded-xl border p-4 space-y-4">
   <div className="space-y-2"><h2 className="text-lg font-semibold">Fair Value · DCF a scenari</h2>
-   <p className={`text-xs ${muted}`}>Compilazione automatica dai bilanci caricati. FCF: mediana dei FCF positivi degli ultimi 3 esercizi; crescita: CAGR storico con almeno 3 osservazioni, limitato tra −5% e +12%, altrimenti 5%. WACC non precompilato: deve essere stimato con parametri verificati (anche senza Gemini). Crescita terminale 2,5% è un’ipotesi standard modificabile, non un dato di mercato.</p>
+   <p className={`text-xs ${muted}`}>Compilazione automatica dai bilanci caricati. FCF base: mediana dei FCF positivi degli ultimi 3 esercizi; crescita: CAGR storico con almeno 3 osservazioni, limitato tra −5% e +12%, altrimenti 5%. WACC non precompilato: deve essere stimato con parametri verificati (anche senza Gemini). Crescita terminale 2,5% è un’ipotesi standard modificabile, non un dato di mercato.</p>
    <p className={`text-xs ${muted}`}>Ultimo esercizio: {latestFcfYear??"n.d."} · Fonte: {analysisData?.fin?.source||"non specificata"} · Debito netto: {Number.isFinite(debt)?"disponibile":"mancante"}.</p>
-   <p className="text-xs text-amber-600">Azioni: {Number.isFinite(impliedShares)?"stima da capitalizzazione ÷ prezzo (NON azioni diluite certificate); verificare con il bilancio":"dato non disponibile: inserire il numero verificato"}. I dati mancanti non vengono inventati. Importi finanziari in milioni, capitalizzazione in unità intere, stessa valuta.</p>
+   <p className="text-xs text-amber-600">Azioni: {Number.isFinite(reportedShares)&&reportedShares>0?"media annua diluita riportata dal provider (non numero corrente certo); verificare con il bilancio":Number.isFinite(impliedShares)?"solo stima indicativa da capitalizzazione ÷ prezzo: "+impliedShares.toFixed(2)+" mln. Inserire le azioni diluite verificate: la stima non viene applicata automaticamente":"dato mancante: inserire azioni diluite verificate"}. Importi in milioni e nella valuta del titolo. La data del bilancio può differire dalla data del prezzo.</p>
    <details className="rounded-lg border p-3 space-y-3" open>
     <summary className="cursor-pointer font-semibold text-sm">Calcola WACC senza Gemini (gratuito, offline)</summary>
     <p className={`text-xs ${muted} mt-2`}>Inserisci i sei parametri ricavati da fonti attendibili (Investing.com, bilanci ufficiali, BCE/Fed, Damodaran). Il calcolo è locale, senza API né quota Gemini. Non vengono inventati dati. Percentuali in punti percentuali.</p>
@@ -117,12 +121,12 @@ export default function FairValuePanel({dark=false,analysisData=null}){
    <button type="button" onClick={reset} className="rounded-lg border px-3 py-2 text-xs">Ripristina valori suggeriti</button>
   </div>
   <form onSubmit={calculate} className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-   <label className="text-xs space-y-1">FCF ultimo esercizio (milioni)<input required type="number" min="0.000001" step="any" value={fcfBase} onChange={e=>setFcfBase(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
+   <label className="text-xs space-y-1">FCF base (mediana, milioni)<input required type="number" min="0.000001" step="any" value={fcfBase} onChange={e=>setFcfBase(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
    <label className="text-xs space-y-1">Crescita FCF annua (%)<input required type="number" step="0.1" value={fcfGrowth} onChange={e=>setFcfGrowth(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
    <label className="text-xs space-y-1">WACC (%) — da stima o inserimento verificato<input required type="number" step="0.1" value={wacc} onChange={e=>setWacc(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
    <label className="text-xs space-y-1">Crescita terminale (%)<input required type="number" step="0.1" value={growth} onChange={e=>setGrowth(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
    <label className="text-xs space-y-1">Debito netto (milioni)<input required type="number" step="any" value={netDebt} onChange={e=>setNetDebt(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
-   <label className="text-xs space-y-1">Azioni diluite (milioni)<input required type="number" min="0.000001" step="any" value={shares} onChange={e=>setShares(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
+   <label className="text-xs space-y-1">Azioni diluite (medie annue, milioni)<input required type="number" min="0.000001" step="any" value={shares} onChange={e=>setShares(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
    <label className="text-xs space-y-1">Prezzo attuale (opzionale)<input type="number" min="0" step="any" value={price} onChange={e=>setPrice(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
    <button className="col-span-2 sm:col-span-3 rounded-lg bg-emerald-600 text-white p-2 text-sm font-semibold">Calcola fair value</button>
   </form>
