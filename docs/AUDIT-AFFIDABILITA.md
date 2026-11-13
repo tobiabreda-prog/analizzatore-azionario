@@ -10,7 +10,7 @@ Ridurre i falsi segnali e rendere espliciti i casi in cui i dati non sono suffic
 ## Correzioni applicate
 
 - **Prezzo e data coerenti:** il prezzo principale dell'analisi usa l'ultima chiusura giornaliera restituita da Yahoo Finance, allineata alla data `asOf`. Non mescola più il prezzo intraday `regularMarketPrice` con una data riferita all'ultima barra storica.
-- **Valori mancanti:** utile netto, EBIT e EPS mancanti restano `null`. Non vengono convertiti implicitamente in margini o crescite pari a zero.
+- **Valori mancanti:** utile netto, EBIT, EPS, high/low e volume mancanti restano `null`. Non vengono convertiti implicitamente in margini, crescite, supporti/resistenze o volumi pari a zero. Anche le tabelle annuali usano la stessa regola.
 - **Gate di affidabilità:** verifica date ISO reali, ordinamento e coerenza dello storico, almeno 40 osservazioni settimanali, tre esercizi distinti con ricavi positivi e utile netto disponibile, data/fonte dell'ultimo bilancio, data dei multipli e punteggi nell'intervallo 0–100.
 - **Copertura dei fattori:** distingue i fattori essenziali mancanti dai fattori facoltativi e conta soltanto punteggi numerici validi.
 - **Segnali SMA:** rifiuta barre con date impossibili, duplicate o non strettamente cronologiche. Evita di calcolare medie su una sequenza temporalmente disordinata.
