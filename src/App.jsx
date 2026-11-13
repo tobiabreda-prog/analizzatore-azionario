@@ -30,12 +30,11 @@ function parseJSON(txt) {
   } catch (e) { return null; }
 }
 
-async function callGeminiAPI(systemInstruction, userPrompt, useSearch = true) {
+async function callGeminiAPI(systemInstruction, userPrompt) {
   let apiKey = "";
   try { apiKey = localStorage.getItem("gemini_api_key") || ""; } catch (e) {}
   if (!apiKey) throw new Error("Chiave API Gemini mancante: inseriscila con l'icona della chiave in alto.");
-  let model = "gemini-3.5-flash-lite";
-  try { model = localStorage.getItem("gemini_model") || model; } catch (e) {}
+  const model = "gemini-3.5-flash-lite";
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   
   const payload = {
@@ -44,9 +43,7 @@ async function callGeminiAPI(systemInstruction, userPrompt, useSearch = true) {
     generationConfig: { responseMimeType: "application/json", temperature: 0.3, maxOutputTokens: 3072 }
   };
 
-  if (useSearch) {
-    payload.tools = [{ "google_search": {} }];
-  }
+  // Nessun Search grounding: Gemini interpreta solo i dati già verificati.
 
   let delay = 1000;
   let rateRetried = false;
@@ -275,7 +272,6 @@ export default function AnalizzatoreAzionario() {
   const [showKey, setShowKey] = useState(false);
   const [warns, setWarns] = useState([]);
   const [cachedAt, setCachedAt] = useState(null);
-  const [fhVal, setFhVal] = useState(() => { try { return localStorage.getItem("finnhub_key") || ""; } catch (e) { return ""; } });
   const [avVal, setAvVal] = useState(() => { try { return localStorage.getItem("av_key") || ""; } catch (e) { return ""; } });
   const [avUsage, setAvUsage] = useState(() => {
     try {
@@ -293,26 +289,23 @@ export default function AnalizzatoreAzionario() {
   };
   const [diag, setDiag] = useState(null);
   const [diagBusy, setDiagBusy] = useState(false);
-  const runDiag = async () => { setDiagBusy(true); setDiag(null); try { setDiag(await diagnostics(fhVal.trim(), avVal.trim())); } catch (e) { setDiag([{ name: "Diagnostica", ok: false, detail: e.message }]); } refreshAvUsage(); setDiagBusy(false); };
-  const [modelVal, setModelVal] = useState(() => { try { return localStorage.getItem("gemini_model") || "gemini-3.5-flash-lite"; } catch (e) { return "gemini-3.5-flash-lite"; } });
+  const runDiag = async () => { setDiagBusy(true); setDiag(null); try { setDiag(await diagnostics("", avVal.trim())); } catch (e) { setDiag([{ name: "Diagnostica", ok: false, detail: e.message }]); } refreshAvUsage(); setDiagBusy(false); };
   const [testMsg, setTestMsg] = useState("");
-  const [models, setModels] = useState([]);
   const [testing, setTesting] = useState(false);
   const testKey = async () => {
-    setTesting(true); setTestMsg("Test in corso…"); setModels([]);
+    setTesting(true); setTestMsg("Verifica del modello gratuito in corso…");
     try {
       const k = keyVal.trim();
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${k}`);
-      const t = await r.text();
-      if (!r.ok) { setTestMsg(`Chiave NON valida o non abilitata (HTTP ${r.status}): ${t.slice(0, 300)}`); setTesting(false); return; }
-      const list = (JSON.parse(t).models || [])
-        .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
-        .map((m) => m.name.replace("models/", ""))
-        .filter((n) => /gemini/.test(n) && !/(embedding|tts|image|live|audio|robotics|computer|thinking-exp)/.test(n));
-      setModels(list);
-      setTestMsg(`Chiave valida. ${list.length} modelli disponibili: tocca quello da usare (consigliato un "flash").`);
-    } catch (e) { setTestMsg("Errore di rete: " + e.message); }
-    setTesting(false);
+      if (!k) throw new Error("Inserisci prima la chiave Gemini.");
+      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=" + encodeURIComponent(k), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: "Rispondi esclusivamente con JSON: {\\\"ok\\\":true}" }] }], generationConfig: { responseMimeType: "application/json", maxOutputTokens: 32 } })
+      });
+      const body = await r.text();
+      if (!r.ok) throw new Error("Gemini HTTP " + r.status + ": " + body.slice(0, 240));
+      setTestMsg("Chiave valida: gemini-3.5-flash-lite risponde correttamente. Il piano gratuito ha limiti di utilizzo.");
+    } catch (e) { setTestMsg("Test non riuscito: " + e.message); }
+    finally { setTesting(false); }
   };
   const [keyVal, setKeyVal] = useState(() => { try { return localStorage.getItem("gemini_api_key") || ""; } catch (e) { return ""; } });
   const busy = step >= 0 && step < STEPS.length;
@@ -343,9 +336,8 @@ export default function AnalizzatoreAzionario() {
     const acc = resume ? { ...data } : {};
     const w = [];
     setWarns([]);
-    let fhKey = "";
     let avKey = "";
-    try { fhKey = (localStorage.getItem("finnhub_key") || "").trim(); avKey = (localStorage.getItem("av_key") || "").trim(); } catch (e) {}
+    try { avKey = (localStorage.getItem("av_key") || "").trim(); } catch (e) {}
     const soft = async (fn, empty, label) => {
       try { return await fn(); } catch (e) { w.push(`${label}: dati non disponibili (${e.message.slice(0, 80)})`); setWarns([...w]); return empty; }
     };
@@ -357,7 +349,7 @@ export default function AnalizzatoreAzionario() {
       const sym = acc.quote.ticker;
       if (!acc.fin || !acc.val) {
         setStep(1);
-        const r = await soft(() => loadFundamentals(sym, fhKey), { fin: EMPTY_FIN(), val: EMPTY_VAL() }, "Bilanci e multipli");
+        const r = await soft(() => loadFundamentals(sym), { fin: EMPTY_FIN(), val: EMPTY_VAL() }, "Bilanci e multipli");
         acc.fin = r.fin; acc.val = r.val;
         if (acc.val.marketCap && !acc.quote.marketCap) acc.quote = { ...acc.quote, marketCap: acc.val.marketCap };
         setData({ ...acc });
@@ -370,7 +362,7 @@ export default function AnalizzatoreAzionario() {
       if (!acc.an || acc.mkt === undefined) {
         setStep(2);
         const [an, mkt] = await Promise.all([
-          acc.an ? acc.an : soft(() => loadAnalysts(sym, fhKey, avKey), EMPTY_AN(), "Analisti"),
+          acc.an ? acc.an : soft(() => loadAnalysts(sym, "", avKey), EMPTY_AN(), "Analisti"),
           acc.mkt !== undefined ? acc.mkt : soft(() => loadMarket(sym, acc.quote.history), null, "Confronto con l'indice"),
         ]);
         acc.an = an; acc.mkt = mkt;
@@ -424,7 +416,7 @@ export default function AnalizzatoreAzionario() {
   const up = (x) => x != null && x >= 0;
 
   const Card = ({ title, children, meta }) => (
-    <section className={`rounded-xl border p-4 ${th.card}`}>
+    <section className={`app-card rounded-xl border p-4 ${th.card}`}>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h2 className="font-semibold text-base">{title}</h2>
         {meta}
@@ -479,24 +471,43 @@ export default function AnalizzatoreAzionario() {
   if (showV2) return <V2Console dark={dark} onBack={() => setShowV2(false)} analysisData={data} analysisScore={S} />;
 
   return (
-    <div className={`min-h-screen ${th.bg} ${dark ? "theme-dark" : "theme-light"}`}>
-      <div className="max-w-5xl mx-auto p-3 sm:p-5 space-y-4">
-        <div className="flex items-center justify-between gap-2">
-          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2"><TrendingUp className="text-emerald-500" />Analisi Finanziaria</h1>
-          <div className="flex gap-2">
-            <button onClick={() => setShowV2(true)} className={`px-2 py-1.5 rounded-lg border text-xs font-semibold ${th.card}`} aria-label="Apri workspace 2.0">2.0</button>
-            <button onClick={() => setShowKey(!showKey)} className={`p-2 rounded-lg border ${th.card}`} aria-label="Chiave API"><Key size={16} /></button>
-            <button onClick={() => { const nd = !dark; setDark(nd); setThemeFixed(true); try { localStorage.setItem("theme", nd ? "dark" : "light"); } catch (e) {} }} className={`p-2 rounded-lg border ${th.card}`} aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
+    <div className={`app-shell min-h-screen ${th.bg} ${dark ? "theme-dark" : "theme-light"}`}>
+      <div className="app-main-container max-w-6xl mx-auto p-3 sm:p-6 space-y-5">
+        <header className="app-topbar">
+          <div className="app-brand">
+            <img src="/icon.svg" alt="Analizzatore Azionario" className="app-brand-icon" />
+            <div className="min-w-0">
+              <div className="app-kicker">PERSONAL INVESTMENT INTELLIGENCE</div>
+              <h1 className="app-brand-title">Analizzatore <span>Azionario</span></h1>
+              <p className="app-brand-subtitle">Analisi quantitativa, rischio e qualità dei dati in un’unica console.</p>
+            </div>
           </div>
-        </div>
+          <div className="app-actions">
+            <button onClick={() => setShowV2(true)} className="app-action-button app-workspace-button" aria-label="Apri workspace 2.0"><TrendingUp size={16} /><span>Workspace 2.0</span></button>
+            <button onClick={() => setShowKey(!showKey)} className="app-action-button" aria-label="Impostazioni fonti dati"><Key size={16} /></button>
+            <button onClick={() => { const nd = !dark; setDark(nd); setThemeFixed(true); try { localStorage.setItem("theme", nd ? "dark" : "light"); } catch (e) {} }} className="app-action-button" aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
+          </div>
+        </header>
+        {!q && (
+          <section className="app-hero">
+            <div className="app-hero-copy">
+              <div className="app-hero-eyebrow"><span className="app-live-dot" /> IL TUO CENTRO DI ANALISI DEGLI INVESTIMENTI</div>
+              <h2>Investi con metodo.<br /><span>Decidi con dati.</span></h2>
+              <p>Valutazioni fondamentali e tecniche, contesto macroeconomico e controllo del rischio. Nessun segnale viene mostrato quando i dati non superano i controlli di qualità.</p>
+              <div className="app-hero-tags"><span>Fondamentali</span><span>Analisi tecnica</span><span>Fair Value</span><span>Risk management</span></div>
+            </div>
+            <div className="app-hero-art" aria-hidden="true">
+              <div className="app-hero-orbit orbit-one" /><div className="app-hero-orbit orbit-two" />
+              <img src="/icon.svg" alt="" />
+              <div className="app-hero-caption"><b>DISCIPLINA</b><span>Prima i dati, poi le decisioni</span></div>
+            </div>
+          </section>
+        )}
         {showKey && (
           <div className={`rounded-xl border p-3 text-sm space-y-2 ${th.card}`}>
             <div className="font-medium">Chiave API Gemini</div>
-            <div className={`text-xs ${th.mute}`}>Salvata solo su questo dispositivo. Creala gratis su aistudio.google.com/apikey</div>
+            <div className={`text-xs ${th.mute}`}>Salvata solo su questo dispositivo. Usa un progetto Google AI Studio senza fatturazione collegata: l’app usa solo gemini-3.5-flash-lite e non attiva Search grounding.</div>
             <input type="password" value={keyVal} onChange={(e) => setKeyVal(e.target.value)} placeholder="AIza…" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
-            <div className="font-medium pt-1">Chiave Finnhub (facoltativa)</div>
-            <div className={`text-xs ${th.mute}`}>Per rating, target price e peer dei titoli USA. Gratis su finnhub.io/register</div>
-            <input type="password" value={fhVal} onChange={(e) => setFhVal(e.target.value)} placeholder="Finnhub API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="font-medium pt-1">Chiave Alpha Vantage (facoltativa)</div>
             <div className={`text-xs ${th.mute}`}>Aggiunge target price e rating per i titoli USA (25 richieste al giorno). Gratis su alphavantage.co/support/#api-key</div>
             <input type="password" value={avVal} onChange={(e) => setAvVal(e.target.value)} placeholder="Alpha Vantage API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
@@ -508,11 +519,9 @@ export default function AnalizzatoreAzionario() {
               <div className={`h-full ${avUsage >= 20 ? "bg-red-500" : avUsage >= 15 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${Math.min(100, avUsage / 20 * 100)}%` }} />
             </div>
             <button type="button" onClick={refreshAvUsage} className={`text-xs underline ${th.mute}`}>Aggiorna contatore</button>
-            <div className="font-medium pt-1">Modello</div>
-            <input type="text" value={modelVal} onChange={(e) => setModelVal(e.target.value)} className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="flex gap-2">
               <button disabled={testing} onClick={testKey} className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>Testa chiave</button>
-              <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); localStorage.setItem("gemini_model", modelVal.trim() || "gemini-3.5-flash-lite"); localStorage.setItem("finnhub_key", fhVal.trim()); localStorage.setItem("av_key", avVal.trim()); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium">Salva</button>
+              <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); localStorage.removeItem("gemini_model"); localStorage.removeItem("finnhub_key"); localStorage.setItem("av_key", avVal.trim()); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium">Salva</button>
             </div>
             <button disabled={diagBusy} onClick={runDiag} className={`w-full px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>{diagBusy ? "Test dati in corso…" : "Testa fonti dati"}</button>
             {diag && (
@@ -521,18 +530,11 @@ export default function AnalizzatoreAzionario() {
               </div>
             )}
             {testMsg && <div className={`text-xs break-words ${th.mute}`}>{testMsg}</div>}
-            {models.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {models.map((m) => (
-                  <button key={m} onClick={() => setModelVal(m)} className={`px-2 py-1 rounded-full border text-xs ${m === modelVal ? "bg-emerald-700 text-white border-emerald-700" : th.card}`}>{m}</button>
-                ))}
-              </div>
-            )}
           </div>
         )}
 
-        <div className="relative">
-          <div className="flex gap-2">
+        <div className="app-search-panel relative">
+          <div className="app-search-row flex gap-2">
             <input 
               value={input} 
               onChange={(e) => { setInput(e.target.value); setShowSuggestions(true); }} 
@@ -544,9 +546,9 @@ export default function AnalizzatoreAzionario() {
                 }
               }} 
               placeholder="Sigla o nome (es. AAPL, ENI.MI, Ferrari…)" 
-              className={`flex-1 min-w-0 px-3 py-2 rounded-lg border text-sm ${th.inp}`} 
+              className={`app-search-input flex-1 min-w-0 px-3 py-2 rounded-lg border text-sm ${th.inp}`} 
             />
-            <button onClick={() => { setShowSuggestions(false); run(); }} disabled={busy || !input.trim()} className="px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"><Search size={16} />Analizza</button>
+            <button onClick={() => { setShowSuggestions(false); run(); }} disabled={busy || !input.trim()} className="app-search-button px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"><Search size={16} />Analizza</button>
           </div>
           
           {showSuggestions && filteredSuggestions.length > 0 && (
@@ -569,6 +571,12 @@ export default function AnalizzatoreAzionario() {
           )}
         </div>
 
+        {!q && (
+          <div className="app-quick-picks flex flex-wrap items-center gap-2">
+            <span className="app-quick-label">Titoli rapidi</span>
+            {POPULAR_TICKERS.slice(0, 8).map((item) => <button type="button" key={item.ticker} onClick={() => { setInput(item.ticker); run(item.ticker); }} className="app-ticker-chip"><b>{item.ticker}</b><span>{item.name}</span></button>)}
+          </div>
+        )}
         {hist.length > 0 && (
           <div className="flex flex-wrap gap-1.5 items-center text-xs">
             <span className={th.mute}>Recenti:</span>
