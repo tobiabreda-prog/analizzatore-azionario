@@ -11,7 +11,8 @@ export function normalizeInstrument(input) {
 
 export function normalizeObservation(input) {
   if (!input || typeof input !== "object") throw new Error("Osservazione non valida");
-  const value = Number(input.value);
+  if (input.value === null || input.value === undefined || (typeof input.value === "string" && input.value.trim() === "")) throw new Error("Valore osservazione assente");
+  const value = typeof input.value === "number" ? input.value : Number(input.value);
   if (!Number.isFinite(value)) throw new Error("Valore osservazione non numerico");
   const asOf = input.asOf ?? input.date;
   if (!asOf || Number.isNaN(Date.parse(asOf))) throw new Error("Data osservazione non valida");
