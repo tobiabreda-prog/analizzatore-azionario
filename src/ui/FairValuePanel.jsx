@@ -15,7 +15,8 @@ export default function FairValuePanel({dark=false,analysisData=null}){
  const latestAnnual=annual.at(-1);
  const latestFcfYear=latestAnnual?.y;
  const recentFcfs=annual.slice(-3).map(x=>x.fcf).filter(x=>Number.isFinite(x)&&x>0);
- const fcf=recentFcfs.length>=2?[...recentFcfs].sort((a,b)=>a-b)[Math.floor(recentFcfs.length/2)]:null;
+ const sortedFcfs=[...recentFcfs].sort((a,b)=>a-b);
+ const fcf=sortedFcfs.length>=2?(sortedFcfs.length%2?sortedFcfs[Math.floor(sortedFcfs.length/2)]:(sortedFcfs[sortedFcfs.length/2-1]+sortedFcfs[sortedFcfs.length/2])/2):null;
  const history=annual.slice(-5).filter(x=>Number.isFinite(x.fcf)&&x.fcf>0);
  const yearSpan=history.length>=3?history.at(-1).y-history[0].y:0;
  const cagr=history.length>=3&&yearSpan>=2?Math.pow(history.at(-1).fcf/history[0].fcf,1/yearSpan)-1:null;
