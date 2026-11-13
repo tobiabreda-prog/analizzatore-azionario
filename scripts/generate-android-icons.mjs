@@ -26,28 +26,43 @@ for (const [density, size] of Object.entries(densities)) {
 // secondo sfondo arrotondato e non altera l'aspetto del salvadanaio.
 const adaptiveForeground = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="pig" x1="0" y1="0" x2="0.9" y2="1"><stop offset="0" stop-color="#ffbd83"/><stop offset="1" stop-color="#e77c55"/></linearGradient>
-    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff0a6"/><stop offset=".55" stop-color="#f6c84d"/><stop offset="1" stop-color="#d99022"/></linearGradient>
+    <linearGradient id="pig" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#ffb3c8"/><stop offset="1" stop-color="#f27aa3"/></linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff0a6"/><stop offset=".55" stop-color="#f7c948"/><stop offset="1" stop-color="#dc9420"/></linearGradient>
   </defs>
-  <g transform="translate(118 118) scale(.54)">
-    <g transform="translate(340 94) rotate(17)">
-      <circle r="48" fill="url(#gold)" stroke="#ffe89a" stroke-width="8"/>
-      <circle r="36" fill="none" stroke="#bd811d" stroke-width="5" opacity=".8"/>
-      <path d="M-8-22h16M-8 22h16M0-28v56" stroke="#a86c17" stroke-width="7" stroke-linecap="round"/>
+  <g transform="translate(85 100) scale(.66)">
+    <!-- zampe -->
+    <rect x="160" y="352" width="50" height="78" rx="22" fill="#ee6f9b" stroke="#8a3a4a" stroke-width="9"/>
+    <rect x="300" y="352" width="50" height="78" rx="22" fill="#ee6f9b" stroke="#8a3a4a" stroke-width="9"/>
+    <!-- codino -->
+    <path d="M108 262c-30-4-44-28-30-44 12-13 30-3 22 10" fill="none" stroke="#8a3a4a" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- corpo -->
+    <ellipse cx="255" cy="285" rx="158" ry="118" fill="url(#pig)" stroke="#8a3a4a" stroke-width="9"/>
+    <!-- orecchio -->
+    <path d="M292 184l22-52c22 6 44 24 50 56z" fill="#ee6f9b" stroke="#8a3a4a" stroke-width="9" stroke-linejoin="round"/>
+    <!-- luce -->
+    <path d="M130 250c10-38 42-62 82-68" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" opacity=".55"/>
+    <!-- fessura -->
+    <rect x="198" y="176" width="86" height="15" rx="7.5" fill="#6b2d3c"/>
+    <!-- fiorellino -->
+    <g transform="translate(205 318)">
+      <g fill="#fff6e3" stroke="#d9a0b0" stroke-width="3">
+        <circle cx="0" cy="-17" r="11"/><circle cx="16" cy="-5" r="11"/><circle cx="10" cy="14" r="11"/><circle cx="-10" cy="14" r="11"/><circle cx="-16" cy="-5" r="11"/>
+      </g>
+      <circle r="9" fill="#f7c948" stroke="#c98a1a" stroke-width="3"/>
     </g>
-    <path d="M320 150l-18 42" stroke="#f6c84d" stroke-width="8" stroke-linecap="round" stroke-dasharray="5 13" opacity=".9"/>
-    <path d="M123 251c-17-13-26-31-21-48 19 3 35 15 44 32 24-18 57-28 96-28 79 0 139 43 139 111 0 43-24 77-64 96l7 37h-47l-13-27c-16 4-34 6-52 6-17 0-34-2-49-6l-14 27h-47l8-43c-22-20-35-47-35-79 0-44 17-81 48-105z" fill="url(#pig)" stroke="#ffd0a5" stroke-width="8" stroke-linejoin="round"/>
-    <path d="M145 225c-22-19-29-47-16-72 30 7 52 27 59 54" fill="#e77c55" stroke="#ffd0a5" stroke-width="8" stroke-linejoin="round"/>
-    <path d="M294 217c10-24 34-39 63-38 4 28-7 52-29 67" fill="#e77c55" stroke="#ffd0a5" stroke-width="8" stroke-linejoin="round"/>
-    <path d="M191 253c15-10 30-10 45 0" fill="none" stroke="#a84f3d" stroke-width="9" stroke-linecap="round"/>
-    <circle cx="288" cy="270" r="8" fill="#442c32"/>
-    <ellipse cx="342" cy="313" rx="43" ry="30" fill="#f5a17c" stroke="#ffd0a5" stroke-width="7"/>
-    <ellipse cx="330" cy="312" rx="6" ry="9" fill="#a84f3d"/>
-    <ellipse cx="354" cy="312" rx="6" ry="9" fill="#a84f3d"/>
-    <path d="M202 224h67" stroke="#7c452e" stroke-width="12" stroke-linecap="round"/>
-    <path d="M219 218l7-10 7 10 7-10 7 10 7-10 7 10" fill="none" stroke="#ffe7a0" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M174 374c-4 20-2 34 5 45M303 374c4 20 2 34-5 45" stroke="#c9684c" stroke-width="11" stroke-linecap="round"/>
-    <path d="M125 325c-20 7-31 0-35-16" fill="none" stroke="#ffd0a5" stroke-width="9" stroke-linecap="round"/>
+    <!-- occhio + guancia -->
+    <ellipse cx="330" cy="318" rx="24" ry="15" fill="#ff8fb3" opacity=".7"/>
+    <circle cx="335" cy="262" r="12" fill="#4a2230"/><circle cx="339" cy="258" r="4" fill="#fff"/>
+    <!-- grugno dorato -->
+    <ellipse cx="408" cy="296" rx="40" ry="46" fill="url(#gold)" stroke="#a8681a" stroke-width="9"/>
+    <ellipse cx="398" cy="296" rx="6" ry="12" fill="#8a4b12"/><ellipse cx="420" cy="296" rx="6" ry="12" fill="#8a4b12"/>
+    <!-- moneta che entra -->
+    <g transform="translate(240 92) rotate(-10)">
+      <circle r="50" fill="url(#gold)" stroke="#a8681a" stroke-width="9"/>
+      <circle r="36" fill="none" stroke="#c98a1a" stroke-width="5"/>
+      <path d="M-20 14l13-13 10 9 21-24" fill="none" stroke="#8a4b12" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M6-14h17v17" fill="none" stroke="#8a4b12" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
   </g>
 </svg>`;
 
@@ -74,7 +89,7 @@ await fs.promises.writeFile(path.join(adaptiveDir, "ic_launcher_round.xml"), `<?
 </adaptive-icon>`);
 await fs.promises.writeFile(path.join(valuesDir, "ic_launcher_background.xml"), `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#102B46</color>
+    <color name="ic_launcher_background">#8FD8D6</color>
 </resources>`);
 
 // Collega esplicitamente l'icona generata all'app Android.
