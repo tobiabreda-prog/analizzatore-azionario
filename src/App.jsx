@@ -273,23 +273,9 @@ export default function AnalizzatoreAzionario() {
   const [warns, setWarns] = useState([]);
   const [cachedAt, setCachedAt] = useState(null);
   const [avVal, setAvVal] = useState(() => { try { return localStorage.getItem("av_key") || ""; } catch (e) { return ""; } });
-  const [avUsage, setAvUsage] = useState(() => {
-    try {
-      const day = new Date().toISOString().slice(0, 10);
-      const value = Number(localStorage.getItem("av_count_" + day) || 0);
-      return Number.isFinite(value) && value > 0 ? Math.min(value, 20) : 0;
-    } catch (e) { return 0; }
-  });
-  const refreshAvUsage = () => {
-    try {
-      const day = new Date().toISOString().slice(0, 10);
-      const value = Number(localStorage.getItem("av_count_" + day) || 0);
-      setAvUsage(Number.isFinite(value) && value > 0 ? Math.min(value, 20) : 0);
-    } catch (e) { setAvUsage(0); }
-  };
   const [diag, setDiag] = useState(null);
   const [diagBusy, setDiagBusy] = useState(false);
-  const runDiag = async () => { setDiagBusy(true); setDiag(null); try { setDiag(await diagnostics("", avVal.trim())); } catch (e) { setDiag([{ name: "Diagnostica", ok: false, detail: e.message }]); } refreshAvUsage(); setDiagBusy(false); };
+  const runDiag = async () => { setDiagBusy(true); setDiag(null); try { setDiag(await diagnostics("", avVal.trim())); } catch (e) { setDiag([{ name: "Diagnostica", ok: false, detail: e.message }]); } finally { setDiagBusy(false); } };
   const [testMsg, setTestMsg] = useState("");
   const [testing, setTesting] = useState(false);
   const testKey = async () => {
@@ -366,7 +352,6 @@ export default function AnalizzatoreAzionario() {
           acc.mkt !== undefined ? acc.mkt : soft(() => loadMarket(sym, acc.quote.history), null, "Confronto con l'indice"),
         ]);
         acc.an = an; acc.mkt = mkt;
-        refreshAvUsage();
         setData({ ...acc });
       }
       setStep(3);
@@ -511,14 +496,7 @@ export default function AnalizzatoreAzionario() {
             <div className="font-medium pt-1">Chiave Alpha Vantage (facoltativa)</div>
             <div className={`text-xs ${th.mute}`}>Aggiunge target price e rating per i titoli USA (25 richieste al giorno). Gratis su alphavantage.co/support/#api-key</div>
             <input type="password" value={avVal} onChange={(e) => setAvVal(e.target.value)} placeholder="Alpha Vantage API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
-            <div className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs ${th.card}`}>
-              <span className={th.mute}>Consumo Alpha Vantage oggi</span>
-              <span className="font-semibold tabular-nums">{avUsage}/20 richieste</span>
-            </div>
-            <div className={`h-1.5 rounded-full overflow-hidden ${dark ? "bg-slate-800" : "bg-slate-200"}`}>
-              <div className={`h-full ${avUsage >= 20 ? "bg-red-500" : avUsage >= 15 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${Math.min(100, avUsage / 20 * 100)}%` }} />
-            </div>
-            <button type="button" onClick={refreshAvUsage} className={`text-xs underline ${th.mute}`}>Aggiorna contatore</button>
+            <div className={`text-xs ${th.mute}`}>Piano gratuito: 25 richieste al giorno. L’app usa Alpha Vantage solo come integrazione facoltativa; le serie sono giornaliere, non realtime.</div>
             <div className="flex gap-2">
               <button disabled={testing} onClick={testKey} className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>Testa chiave</button>
               <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); localStorage.removeItem("gemini_model"); localStorage.removeItem("finnhub_key"); localStorage.setItem("av_key", avVal.trim()); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium">Salva</button>
@@ -777,7 +755,7 @@ export default function AnalizzatoreAzionario() {
                 )}
               </div>
             ) : (
-              <div className={`text-xs mb-1 ${th.mute}`}>Consenso degli analisti (target price e rating) non disponibile per questo titolo: le fonti gratuite lo coprono solo per i titoli USA e con la chiave Finnhub o Alpha Vantage. Il punteggio si basa sulla forza relativa.</div>
+              <div className={`text-xs mb-1 ${th.mute}`}>Consenso degli analisti (target price e rating) non disponibile per questo titolo: la copertura gratuita è limitata e dipende dai dati restituiti da Yahoo Finance o, per alcuni titoli USA, da Alpha Vantage. Il punteggio si basa sulla forza relativa.</div>
             )}
             {rsData.length > 0 && (
               <div className="mt-3">
