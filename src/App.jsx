@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { ComposedChart, LineChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell } from "recharts";
 import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, loadCorporateEvents, diagnostics } from "./data.js";
 import { printReport } from "./report.js";
+import { assessAnalysisReadiness } from "./core/analysis-gate.js";
 import V2Console from "./ui/V2Console.jsx";
 import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key, Printer } from "lucide-react";
 
@@ -162,11 +163,12 @@ export function computeScores(D, tech) {
   const scores = { "Trend tecnico": tS, Crescita: gS, Redditività: rS, "Solidità finanziaria": sS, Valutazione: vS, Sentiment: seS };
   let wsum = 0, tot2 = 0;
   Object.entries(scores).forEach(([k, s]) => { if (s != null) { wsum += WEIGHTS[k]; tot2 += s * WEIGHTS[k]; } });
-  const overall = wsum ? tot2 / wsum : null;
-  let rel = (Object.values(scores).filter((x) => x != null).length / 6) * 100;
+  const readiness = assessAnalysisReadiness({ quote: q, fin: f, val: v, scores });
+  const overall = readiness.ready && wsum ? tot2 / wsum : null;
+  let rel = readiness.ready ? (Object.values(scores).filter((x) => x != null).length / 6) * 100 : 0;
   const stale = daysOld(q?.asOf) > 2 || f?.isLatest === false;
   if (stale) rel -= 15;
-  return { scores, overall, rel: Math.max(0, Math.round(rel)), derived: { cagr, epsG, nm, om, nde, up, rsEx } };
+  return { scores, overall, rel: Math.max(0, Math.round(rel)), readiness, derived: { cagr, epsG, nm, om, nde, up, rsEx } };
 }
 const labelOf = (s) => (s == null ? "n.d." : s >= 75 ? "COMPRARE" : s >= 62 ? "ACCUMULARE" : s >= 45 ? "MANTENERE" : s >= 32 ? "EVITARE" : "VENDERE");
 const LABEL_COLOR = { COMPRARE: "bg-emerald-700", ACCUMULARE: "bg-lime-700", MANTENERE: "bg-amber-400 !text-slate-900", EVITARE: "bg-orange-700", VENDERE: "bg-red-700", "n.d.": "bg-slate-600" };
