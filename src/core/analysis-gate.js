@@ -22,6 +22,9 @@ export function assessAnalysisReadiness({ quote, fin, val, scores = {}, now = ne
   if (usableYears.length < 3) reasons.push("Bilanci annuali insufficienti (servono almeno 3 esercizi con ricavi e utile netto disponibili)");
   const reportAge = ageDays(fin?.lastReportDate, now);
   if (!fin?.lastReportDate || reportAge == null || reportAge < -1 || reportAge > 560 || fin?.isLatest === false) reasons.push("Ultimo bilancio non verificato o troppo datato");
+  if (!fin?.source) reasons.push("Fonte dei bilanci assente");
+  const valuationAge = ageDays(val?.asOf, now);
+  if (!val?.source || valuationAge == null || valuationAge < -1 || valuationAge > 7) reasons.push("Fonte o data dei multipli assente/non aggiornata");
   const metrics = Array.isArray(val?.metrics) ? val.metrics : [];
   const comparable = metrics.filter((m) => finite(m?.v) && m.v > 0 && (finite(m?.sector) && m.sector > 0 || finite(m?.hist5y) && m.hist5y > 0));
   if (!comparable.length) reasons.push("Valutazione senza multipli confrontabili con settore o storico");
