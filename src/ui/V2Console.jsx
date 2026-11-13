@@ -9,6 +9,8 @@ import { buildCorporateCalendar, normalizeDividend, normalizeEarningsEvent } fro
 import { parseTradeCsv, serializeTradesCsv } from "../modules/trade-csv.js";
 import { sma, ema, rsi } from "../modules/technical-indicators.js";
 import FairValuePanel from "./FairValuePanel.jsx";
+import { runLongOnlyBacktest } from "../modules/backtest.js";
+import { buildSmaCrossSignals } from "../modules/strategies.js";
 
 const STORE="aa2_workspace_v1";
 const today=()=>new Date().toISOString().slice(0,10);
@@ -38,6 +40,12 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null}){
  const [marketTicker,setMarketTicker]=useState("AAPL");
  const [marketApiKey,setMarketApiKey]=useState("");
  const [marketRows,setMarketRows]=useState([]);
+ const [marketHistory,setMarketHistory]=useState([]);
+ const [backtestResult,setBacktestResult]=useState(null);
+ const [backtestError,setBacktestError]=useState("");
+ const [initialCapital,setInitialCapital]=useState("10000");
+ const [feeBps,setFeeBps]=useState("10");
+ const [slippageBps,setSlippageBps]=useState("5");
  const [marketIndicators,setMarketIndicators]=useState(null);
  const [marketError,setMarketError]=useState("");
  const [marketLoading,setMarketLoading]=useState(false);
@@ -57,7 +65,8 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null}){
  const addTrade=(e)=>{e.preventDefault();setError("");try{const trade={id:crypto.randomUUID(),symbol:ticker,side,quantity:Number(quantity),price:Number(price),currency,date:tradeDate,fees:Number(fees)};const next=[...data.trades,trade];buildPositions(next);setData({...data,trades:next});setTicker("");setPrice("");}catch(err){setError(err.message);}};
  const addEvent=(e)=>{e.preventDefault();setError("");try{if(!eventSource.trim()||!eventTicker.trim())throw new Error("Titolo e fonte del dato sono obbligatori");if(eventType==="earnings"){const event=normalizeEarningsEvent({symbol:eventTicker,date:eventDate,epsEstimate:epsEstimate===""?null:Number(epsEstimate),epsActual:epsActual===""?null:Number(epsActual),source:eventSource.trim(),status:"unconfirmed"});setData({...data,earnings:[...data.earnings,event]});}else{const event=normalizeDividend({symbol:eventTicker,amount:Number(dividendAmount),currency:dividendCurrency,exDate:eventDate,source:eventSource.trim(),status:"unconfirmed"});setData({...data,dividends:[...data.dividends,event]});}setEventTicker("");setEventSource("");setEpsEstimate("");setEpsActual("");setDividendAmount("");}catch(err){setError(err.message);}};
  const removeTrade=(id)=>setData({...data,trades:data.trades.filter(t=>t.id!==id)});
- const loadMarketHistory=async(e)=>{e.preventDefault();setMarketError("");setMarketLoading(true);try{const result=await loadAlphaVantageDaily({symbol:marketTicker.trim().toUpperCase(),apiKey:marketApiKey});setMarketRows(result.rows.slice(-10).reverse());const closes=result.rows.map(x=>x.close);setMarketIndicators({sma20:sma(closes,20),sma50:sma(closes,50),ema20:ema(closes,20),rsi14:rsi(closes,14),observations:closes.length,asOf:result.rows.at(-1)?.date??null});setMarketUsage(getAlphaVantageUsage());}catch(err){setMarketError(err.message);setMarketUsage(getAlphaVantageUsage());}finally{setMarketLoading(false);}};
+ const loadMarketHistory=async(e)=>{e.preventDefault();setMarketError("");setMarketLoading(true);try{const result=await loadAlphaVantageDaily({symbol:marketTicker.trim().toUpperCase(),apiKey:marketApiKey});setMarketRows(result.rows.slice(-10).reverse());setMarketHistory(result.rows);setBacktestResult(null);setBacktestError("");const closes=result.rows.map(x=>x.close);setMarketIndicators({sma20:sma(closes,20),sma50:sma(closes,50),ema20:ema(closes,20),rsi14:rsi(closes,14),observations:closes.length,asOf:result.rows.at(-1)?.date??null});setMarketUsage(getAlphaVantageUsage());}catch(err){setMarketError(err.message);setMarketUsage(getAlphaVantageUsage());}finally{setMarketLoading(false);}};
+ const runBacktest=()=>{setBacktestError("");setBacktestResult(null);try{const signals=buildSmaCrossSignals(marketHistory,20,50);const result=runLongOnlyBacktest({bars:marketHistory.map(({date,close})=>({date,close})),signals,initialCapital:Number(initialCapital),feeBps:Number(feeBps),slippageBps:Number(slippageBps)});setBacktestResult(result);}catch(err){setBacktestError(err.message);}};
  const loadMacro=async(e)=>{e.preventDefault();setMacroError("");setMacroLoading(true);const series=[
   {id:"FEDFUNDS",label:"Fed Funds rate",unit:"%"},
   {id:"CPIAUCSL",label:"US CPI index",unit:"index"},
@@ -79,9 +88,24 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null}){
  const tabButton=(id,label,Icon)=><button onClick={()=>setTab(id)} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium ${tab===id?"bg-emerald-600 text-white":card+" border"}`}><Icon size={16}/>{label}</button>;
  return <div className={`min-h-screen ${darkClass}`}><div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-5">
   <div className="flex items-center justify-between gap-3"><div><div className="text-xs uppercase tracking-wider text-emerald-500 font-bold">Versione 2.0 · workspace</div><h1 className="text-2xl font-bold">Console finanziaria</h1><p className={`text-sm ${muted}`}>Portafoglio, prezzi giornalieri e indicatori macro · dati locali</p></div><button onClick={onBack} className={`rounded-lg border px-3 py-2 flex gap-2 items-center text-sm ${card}`}><ArrowLeft size={16}/>Versione attuale</button></div>
-  <div className="flex flex-wrap gap-2">{tabButton("portfolio","Portafoglio",Wallet)}{tabButton("market","Mercati",LineChart)}{tabButton("macro","Macro",LineChart)}{tabButton("calendar","Earnings & dividendi",CalendarDays)}{tabButton("quality","Qualità dati",ShieldCheck)}{tabButton("valuation","Fair Value",LineChart)}</div>
+  <div className="flex flex-wrap gap-2">{tabButton("portfolio","Portafoglio",Wallet)}{tabButton("market","Mercati",LineChart)}{tabButton("macro","Macro",LineChart)}{tabButton("calendar","Earnings & dividendi",CalendarDays)}{tabButton("quality","Qualità dati",ShieldCheck)}{tabButton("valuation","Fair Value",LineChart)}{tabButton("backtest","Backtest",LineChart)}</div>
   {error&&<div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm flex gap-2"><AlertTriangle size={17}/>{error}</div>}
   {tab==="valuation"&&<FairValuePanel dark={dark} analysisData={analysisData}/>}
+  {tab==="backtest"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}>
+   <div><h2 className="text-lg font-semibold">Backtest SMA 20/50</h2><p className={`text-xs ${muted}`}>Simulazione long-only sullo storico daily caricato nella scheda Mercati. Il segnale usa la chiusura del giorno t ed è eseguito alla chiusura del giorno successivo.</p></div>
+   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+    <label className="text-xs space-y-1">Capitale iniziale<input type="number" min="1" step="any" value={initialCapital} onChange={e=>setInitialCapital(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
+    <label className="text-xs space-y-1">Commissione per lato (bps)<input type="number" min="0" step="1" value={feeBps} onChange={e=>setFeeBps(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
+    <label className="text-xs space-y-1">Slippage per lato (bps)<input type="number" min="0" step="1" value={slippageBps} onChange={e=>setSlippageBps(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
+   </div>
+   <p className={`text-xs ${muted}`}>Serie caricata: {marketTicker} · {marketHistory.length} barre daily · ultima osservazione {marketHistory.at(-1)?.date||"n.d."}. Prima carica lo storico nella scheda Mercati (Alpha Vantage).</p>
+   <button type="button" disabled={marketHistory.length<50} onClick={runBacktest} className="rounded-lg bg-emerald-600 text-white px-4 py-2 text-sm disabled:opacity-40">Esegui backtest</button>
+   {backtestError&&<p role="alert" className="text-sm text-red-500">{backtestError}</p>}
+   {backtestResult&&<div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+    {[[ "Valore finale",backtestResult.finalValue.toLocaleString("it-IT",{maximumFractionDigits:2}) ],[ "Rendimento totale",(backtestResult.totalReturn*100).toFixed(2)+"%" ],[ "CAGR",backtestResult.cagr===null?"n.d.":(backtestResult.cagr*100).toFixed(2)+"%" ],[ "Max drawdown",(backtestResult.maxDrawdown*100).toFixed(2)+"%" ],[ "Volatilità annualizzata",backtestResult.annualizedVolatility===null?"n.d.":(backtestResult.annualizedVolatility*100).toFixed(2)+"%" ],[ "Operazioni",String(backtestResult.tradeCount) ]].map(([label,value])=><div key={label} className="rounded-lg border border-slate-500/20 p-3"><div className={`text-xs ${muted}`}>{label}</div><div className="font-semibold text-lg">{value}</div></div>)}
+   </div>}
+   <p className={`text-xs ${muted}`}>Limiti essenziali: strategia SMA 20/50 semplificata; nessun benchmark, dividendo, split, FX, imposte, costi specifici dell’intermediario o titoli delistati. Dati non point-in-time: restano possibili survivorship bias e differenze di qualità del feed. Non usare il risultato come previsione o prova di rendimento futuro.</p>
+  </section>}
   {tab==="market"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}><div><h2 className="text-lg font-semibold">Prezzi storici giornalieri</h2><p className={`text-xs ${muted}`}>Provider Alpha Vantage · dati daily, non realtime. Il piano gratuito ha limiti di chiamata e copertura; il risultato dipende dal mercato e dal ticker supportato.</p></div>
    <form onSubmit={loadMarketHistory} className="grid grid-cols-1 sm:grid-cols-3 gap-3"><label className="text-xs space-y-1">Ticker<input required value={marketTicker} onChange={e=>setMarketTicker(e.target.value.toUpperCase())} className="w-full rounded-lg border p-2 bg-transparent text-sm" placeholder="AAPL"/></label><label className="text-xs space-y-1 sm:col-span-2">Chiave API Alpha Vantage<input required type="password" autoComplete="off" value={marketApiKey} onChange={e=>setMarketApiKey(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm" placeholder="Inserisci la tua chiave API"/></label><button disabled={marketLoading} className="rounded-lg bg-emerald-600 text-white p-2 flex items-center justify-center gap-2 text-sm disabled:opacity-50"><RefreshCw size={16}/>{marketLoading?"Caricamento…":"Aggiorna storico"}</button></form>
    <p className={`text-xs ${muted}`}>Richieste registrate oggi su questo browser: {marketUsage} / 25. La chiave resta nella memoria della schermata e non viene salvata nel workspace. Per sicurezza non usare questa modalità in una distribuzione pubblica multiutente.</p>
