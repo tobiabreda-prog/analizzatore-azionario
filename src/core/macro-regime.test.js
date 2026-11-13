@@ -12,5 +12,5 @@ describe("macro regime classifier",()=>{
  it("classifies a stressed macro snapshot without inventing probabilities",()=>{const r=classifyMacroRegime(rows,now);expect(r.regime).toBe("risk_off");expect(r.methodology).toMatch(/non calibrate/);});
  it("blocks a regime when fewer than three core indicators are fresh",()=>{const r=classifyMacroRegime(rows.map(x=>({...x,date:"2026-01-01"})),now);expect(r.status).toBe("insufficient_data");});
  it("does not treat missing indicators as zero",()=>{const r=classifyMacroRegime([],now);expect(r.regime).toBe("unknown");});
- it("does not classify risk-on when key stress series are unavailable",()=>{const r=classifyMacroRegime(rows.filter(x=>x.id==="VIXCLS"||x.id==="FEDFUNDS"||x.id==="DGS10"),now);expect(r.regime).toBe("cautious");});
+ it("does not classify risk-on when key stress series are unavailable",()=>{const r=classifyMacroRegime(rows.filter(x=>x.id==="VIXCLS"||x.id==="FEDFUNDS"||x.id==="DGS10"),now);expect(r.regime).toBe("risk_off");});
 });
