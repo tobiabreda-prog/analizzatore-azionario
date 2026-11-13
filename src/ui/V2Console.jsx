@@ -155,7 +155,7 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null}){
      <div><div className={muted+" text-xs"}>Payout ratio</div><b>{Number.isFinite(analysisData.events.dividends?.payoutRatio)?analysisData.events.dividends.payoutRatio.toFixed(1)+"%":"n.d."}</b></div>
      <div><div className={muted+" text-xs"}>Ex-dividend date</div><b>{analysisData.events.dividends?.exDividendDate||"n.d."}</b></div>
     </div>
-    <div className="text-xs "+muted>Fonte: {analysisData.events.source||"n.d."} · aggiornato {analysisData.events.asOf||"n.d."}. Feed non ufficiale: verifica sempre il calendario investor relations.</div>
+    <div className={"text-xs "+muted}>Fonte: {analysisData.events.source||"n.d."} · aggiornato {analysisData.events.asOf||"n.d."}. Feed non ufficiale: verifica sempre il calendario investor relations.</div>
     {(analysisData.events.earnings?.history||[]).length>0&&<div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="border-b text-left"><th className="py-1">Quarter</th><th>EPS actual</th><th>EPS estimate</th><th>Surprise</th></tr></thead><tbody>{analysisData.events.earnings.history.slice(-4).map((h,i)=><tr key={h.quarter||i} className="border-b border-slate-500/10"><td className="py-1">{h.quarter||"n.d."}</td><td>{h.epsActual??"n.d."}</td><td>{h.epsEstimate??"n.d."}</td><td>{Number.isFinite(h.surprisePct)?(h.surprisePct*100).toFixed(1)+"%":"n.d."}</td></tr>)}</tbody></table></div>}
    </>:<p className={muted+" text-sm"}>Nessun dato automatico disponibile: prima analizza un titolo nella schermata principale oppure verifica il ticker e la disponibilità del provider.</p>}</div>
    <form onSubmit={addEvent} className="grid grid-cols-2 sm:grid-cols-3 gap-3">
