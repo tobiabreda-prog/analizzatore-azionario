@@ -5,6 +5,7 @@ test("fair value calculates DCF scenarios without removed console tabs", async (
   await expect(page.getByRole("heading", { name: "Analizzatore Azionario" })).toBeVisible();
   await page.getByRole("button", { name: "Apri workspace 2.0" }).click();
   await expect(page.getByRole("heading", { name: "Fair Value + Watchlist" })).toBeVisible();
+  await page.getByRole("button", { name: "Fair Value", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Fair Value · DCF a scenari" })).toBeVisible();
   for (const removed of ["Backtest", "Macro", "Mercati", "Portafoglio", "Earnings"]) {
     await expect(page.getByRole("button", { name: removed, exact: true })).toHaveCount(0);
