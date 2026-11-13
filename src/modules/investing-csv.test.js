@@ -92,7 +92,7 @@ describe("import CSV Investing.com", () => {
     const parsed = parseInvestingCsv(sample);
     expect(parsed.trades).toHaveLength(13);
     expect(parsed.trades.find(t => t.symbol === "PRY.MI").price).toBe(103.85);
-    expect(parsed.trades.every(t => /^\\d{4}-\\d{2}-\\d{2}$/.test(t.date))).toBe(true);
+    expect(parsed.trades.every(t => /^\d{4}-\d{2}-\d{2}$/.test(t.date))).toBe(true);
   });
 
 });
