@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { valueScenarios } from "../modules/fair-value.js";
 
 const num=(v)=>v.trim()===""?null:Number(v);
