@@ -1,7 +1,7 @@
 const BASE="https://www.alphavantage.co/query";
 const usageKey=(date=new Date())=>"aa2_av_usage_"+date.toISOString().slice(0,10);
 export function getAlphaVantageUsage(storage=globalThis.localStorage,date=new Date()){
-  try{return Number(storage?.getItem(usageKey(date))??0);}catch{return 0;}
+  try{const n=Number(storage?.getItem(usageKey(date))??0);return Number.isFinite(n)&&n>=0?n:0;}catch{return 0;}
 }
 export async function loadAlphaVantageDaily({symbol,apiKey,fetchImpl=fetch,storage=globalThis.localStorage,maxRequestsPerDay=25}){
   if(!apiKey)throw new Error("Chiave API Alpha Vantage obbligatoria");
