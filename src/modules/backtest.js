@@ -2,7 +2,7 @@ import { MIN_INVESTMENT_NOTIONAL } from "./trading-costs.js";
 import { maxDrawdown, annualizedVolatility } from "./technical-indicators.js";
 const finite=(v)=>typeof v==="number"&&Number.isFinite(v);
 const validDate=(v)=>typeof v==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(new Date(v+"T00:00:00Z").getTime())&&new Date(v+"T00:00:00Z").toISOString().slice(0,10)===v;
-export function runLongOnlyBacktest({bars,signals,initialCapital=10000,feeBps=0,fixedFee=0,buyTaxBps=0,slippageBps=5}) {
+export function runLongOnlyBacktest({bars,signals,initialCapital=10000,feeBps=0,fixedFee=0,buyTaxBps=0,slippageBps=5,minNotional=MIN_INVESTMENT_NOTIONAL}) {
   if(!Array.isArray(bars)||bars.length<3||!Array.isArray(signals)||!finite(initialCapital)||initialCapital<=0||!finite(feeBps)||feeBps<0||!finite(fixedFee)||fixedFee<0||!finite(buyTaxBps)||buyTaxBps<0||!finite(slippageBps)||slippageBps<0||!finite(minNotional)||minNotional<0) throw new Error("Input backtest non validi");
   const sorted=[...bars].sort((a,b)=>a.date.localeCompare(b.date));
   if(sorted.some((b,i)=>!validDate(b.date)||!finite(b.close)||b.close<=0||(i&&b.date===sorted[i-1].date))) throw new Error("Serie prezzi non valida o date duplicate");
