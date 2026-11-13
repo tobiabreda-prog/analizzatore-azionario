@@ -24,7 +24,7 @@ function cleanSymbol(symbol, exchange) {
 export function isInvestingCsv(text) {
   if (typeof text !== "string" || !text.trim()) return false;
   const sections = new Set(["riepilogo posizioni aperte", "posizioni aperte", "posizioni chiuse"]);
-  return text.replace(/^\\uFEFF/, "").split(/\\r?\\n/).some((line) => {
+  return text.replace(/^\uFEFF/, "").split(/\r?\n/).some((line) => {
     if (!line.trim()) return false;
     try {
       const fields = splitLine(line, ",");
