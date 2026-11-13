@@ -468,7 +468,7 @@ export default function AnalizzatoreAzionario() {
     }
   }
   const trend = p != null && s50 != null && s200 != null ? (p > s50 && s50 > s200 ? ["Rialzista", "text-emerald-500"] : p < s50 && s50 < s200 ? ["Ribassista", "text-red-500"] : ["Laterale / incerto", "text-amber-500"]) : ["n.d.", ""];
-  const radar = S ? Object.keys(WEIGHTS).map((k) => ({ k, v: S.scores[k] ?? 0 })) : [];
+  const radar = S ? Object.keys(WEIGHTS).filter((k) => S.scores[k] != null).map((k) => ({ k, v: S.scores[k] })) : [];
   const label = S ? labelOf(S.overall) : null;
   const pctRatings = a?.ratings || null;
   const valMetrics = (v?.metrics || []).filter((m) => num(m.v) != null || num(m.sector) != null);
@@ -823,7 +823,7 @@ export default function AnalizzatoreAzionario() {
                 <span className={`px-4 py-2 rounded-lg text-white font-bold text-lg ${LABEL_COLOR[label]}`}>{label}</span>
                 <div className="text-sm"><div>Confidenza: <b>{S.rel >= 75 ? "Alta" : S.rel >= 50 ? "Media" : "Bassa"}</b> ({S.rel}%)</div><div className={th.mute}>Orizzonte: {fi?.horizon || "n.d."}</div></div>
               </div>
-              {fi && !fi.failed ? (
+              {S.readiness.ready && fi && !fi.failed ? (
                 <>
                   <p className="text-sm leading-relaxed">{fi.motivation}</p>
                   <div className="grid sm:grid-cols-2 gap-3 mt-3 text-sm">
