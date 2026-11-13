@@ -3,20 +3,22 @@ const validDate=(v)=>typeof v==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number
 export function normalizeTrade(t) {
   if(!t||!t.id||!t.symbol||!["BUY","SELL"].includes(t.side)||!finite(t.quantity)||t.quantity<=0||!finite(t.price)||t.price<=0||!t.currency||!validDate(t.date)) throw new Error("Movimento non valido: verificare ID, titolo, lato, quantità, prezzo, valuta e data");
   const fees=finite(t.fees)?t.fees:0;
-  if(fees<0) throw new Error("Commissioni non possono essere negative");
-  return {...t,symbol:String(t.symbol).toUpperCase(),currency:String(t.currency).toUpperCase(),fees};
+  const taxes=finite(t.taxes)?t.taxes:0;
+  if(fees<0||taxes<0) throw new Error("Commissioni e imposte non possono essere negative");
+  if(t.side==="BUY"&&t.quantity*t.price<5000&&["EUR","USD"].includes(String(t.currency).toUpperCase())) throw new Error("Investimento minimo: 5.000 EUR o USD per acquisto");
+  return {...t,symbol:String(t.symbol).toUpperCase(),currency:String(t.currency).toUpperCase(),fees,taxes};
 }
 export function buildPositions(trades=[]) {
   const positions=new Map();
   for(const raw of [...trades].map(normalizeTrade).sort((a,b)=>a.date.localeCompare(b.date))){
-    const p=positions.get(raw.symbol)??{symbol:raw.symbol,currency:raw.currency,quantity:0,costBasis:0,realizedPnl:0,feesPaid:0};
+    const p=positions.get(raw.symbol)??{symbol:raw.symbol,currency:raw.currency,quantity:0,costBasis:0,realizedPnl:0,feesPaid:0,taxesPaid:0};
     if(p.currency!==raw.currency) throw new Error("Valuta incoerente per "+raw.symbol);
-    p.feesPaid+=raw.fees;
-    if(raw.side==="BUY"){p.quantity+=raw.quantity;p.costBasis+=raw.quantity*raw.price+raw.fees;}
+    p.feesPaid+=raw.fees;p.taxesPaid+=raw.taxes;
+    if(raw.side==="BUY"){p.quantity+=raw.quantity;p.costBasis+=raw.quantity*raw.price+raw.fees+raw.taxes;}
     else{
       if(raw.quantity>p.quantity+1e-9) throw new Error("Vendita superiore alla quantità disponibile: "+raw.symbol);
       const average=p.quantity>0?p.costBasis/p.quantity:0;
-      p.realizedPnl+=raw.quantity*raw.price-raw.fees-raw.quantity*average;
+      p.realizedPnl+=raw.quantity*raw.price-raw.fees-raw.taxes-raw.quantity*average;
       p.costBasis-=raw.quantity*average;p.quantity-=raw.quantity;
       if(Math.abs(p.quantity)<1e-9){p.quantity=0;p.costBasis=0;}
     }
