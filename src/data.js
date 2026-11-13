@@ -69,11 +69,12 @@ function weekly(rows) {
   for (const r of rows) {
     const dt = new Date(r.date + "T00:00:00Z");
     const mon = new Date(dt.getTime() - ((dt.getUTCDay() + 6) % 7) * 864e5).toISOString().slice(0, 10);
-    if (mon !== curKey) { if (cur) out.push(cur); curKey = mon; cur = { date: r.date, close: r.close, vol: 0 }; }
-    cur.date = r.date; cur.close = r.close; cur.vol += r.volume || 0;
+    if (mon !== curKey) { if (cur) out.push(cur); curKey = mon; cur = { date: r.date, close: r.close, vol: null }; }
+    cur.date = r.date; cur.close = r.close;
+    if (num(r.volume) != null) cur.vol = (cur.vol ?? 0) + r.volume;
   }
   if (cur) out.push(cur);
-  return out.slice(-104).map((w) => [w.date, round(w.close, 4), round(w.vol / 1e6, 2)]);
+  return out.slice(-104).map((w) => [w.date, round(w.close, 4), w.vol == null ? null : round(w.vol / 1e6, 2)]);
 }
 
 async function chartFor(symbol) {
@@ -89,7 +90,7 @@ async function chartFor(symbol) {
   (res.timestamp || []).forEach((t, i) => {
     const c = num(q.close?.[i]);
     if (c == null) return;
-    rows.push({ date: isoDate(t, off), close: c, high: num(q.high?.[i]) ?? c, low: num(q.low?.[i]) ?? c, volume: num(q.volume?.[i]) || 0 });
+    rows.push({ date: isoDate(t, off), close: c, high: num(q.high?.[i]), low: num(q.low?.[i]), volume: num(q.volume?.[i]) });
   });
   if (rows.length < 2) throw new Error("NOT_FOUND");
   return { meta: res.meta || {}, rows };
@@ -121,7 +122,8 @@ export async function loadQuote(input) {
   // Allinea il prezzo esposto alla data dell'ultima barra daily: regularMarketPrice può essere intraday e avere un timestamp diverso.
   const prev = closes[n - 2];
   const l20 = rows.slice(-20), l60 = rows.slice(-60);
-  const lo = (a) => Math.min(...a.map((r) => r.low)), hi = (a) => Math.max(...a.map((r) => r.high));
+  const lo = (a) => { const values = a.map((r) => r.low).filter(num); return values.length ? Math.min(...values) : null; };
+  const hi = (a) => { const values = a.map((r) => r.high).filter(num); return values.length ? Math.max(...values) : null; };
   return {
     name: meta.longName || meta.shortName || symbol,
     ticker: symbol,
