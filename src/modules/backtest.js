@@ -1,8 +1,8 @@
 import { maxDrawdown, annualizedVolatility } from "./technical-indicators.js";
 const finite=(v)=>typeof v==="number"&&Number.isFinite(v);
 const validDate=(v)=>typeof v==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(new Date(v+"T00:00:00Z").getTime())&&new Date(v+"T00:00:00Z").toISOString().slice(0,10)===v;
-export function runLongOnlyBacktest({bars,signals,initialCapital=10000,feeBps=10,slippageBps=5}) {
-  if(!Array.isArray(bars)||bars.length<3||!Array.isArray(signals)||!finite(initialCapital)||initialCapital<=0||!finite(feeBps)||feeBps<0||!finite(slippageBps)||slippageBps<0) throw new Error("Input backtest non validi");
+export function runLongOnlyBacktest({bars,signals,initialCapital=10000,feeBps=0,fixedFee=0,slippageBps=5}) {
+  if(!Array.isArray(bars)||bars.length<3||!Array.isArray(signals)||!finite(initialCapital)||initialCapital<=0||!finite(feeBps)||feeBps<0||!finite(fixedFee)||fixedFee<0||!finite(slippageBps)||slippageBps<0) throw new Error("Input backtest non validi");
   const sorted=[...bars].sort((a,b)=>a.date.localeCompare(b.date));
   if(sorted.some((b,i)=>!validDate(b.date)||!finite(b.close)||b.close<=0||(i&&b.date===sorted[i-1].date))) throw new Error("Serie prezzi non valida o date duplicate");
   if(signals.some(s=>!s||!validDate(s.date)||![0,1].includes(s.position))||new Set(signals.map(s=>s.date)).size!==signals.length) throw new Error("Segnali non validi o date duplicate: position deve essere 0 oppure 1");
@@ -15,9 +15,16 @@ export function runLongOnlyBacktest({bars,signals,initialCapital=10000,feeBps=10
     const bar=sorted[i], nextPosition=i===0?0:(signalByDate.get(sorted[i-1].date)??prevPosition);
     if(nextPosition!==prevPosition){
       const px=bar.close*(nextPosition?1+slippageBps/10000:1-slippageBps/10000);
-      if(nextPosition){const spend=cash/(1+feeBps/10000);shares=spend/px;cash=0;}
-      else{cash=shares*px*(1-feeBps/10000);shares=0;}
-      trades.push({date:bar.date,side:nextPosition?"BUY":"SELL",price:px});
+      if(nextPosition){
+        if(cash<=fixedFee)throw new Error("Capitale insufficiente per la commissione fissa di acquisto");
+        const spend=(cash-fixedFee)/(1+feeBps/10000);shares=spend/px;cash=0;
+        trades.push({date:bar.date,side:"BUY",price:px,grossNotional:spend,commission:fixedFee+spend*feeBps/10000});
+      } else {
+        const gross=shares*px,net=gross*(1-feeBps/10000)-fixedFee;
+        if(net<0)throw new Error("Commissioni superiori al controvalore della vendita");
+        cash=net;shares=0;
+        trades.push({date:bar.date,side:"SELL",price:px,grossNotional:gross,commission:fixedFee+gross*feeBps/10000});
+      }
       prevPosition=nextPosition;
     }
     curve.push(cash+shares*bar.close);
