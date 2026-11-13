@@ -8,4 +8,5 @@ describe("data quality", () => {
   it("blocks a missing source", () => { expect(() => requireUsable({ value: 10, kind: "price", currency: "EUR", asOf: "2026-11-13" }, { now })).toThrow(); });
   it("normalizes an instrument and requires currency", () => { expect(normalizeInstrument({ ticker: "eni.mi", name: "Eni", currency: "eur" }).ticker).toBe("ENI.MI"); expect(() => normalizeInstrument({ ticker: "ABC", name: "ABC" })).toThrow(); });
   it("normalizes source-dated observations", () => { expect(normalizeObservation({ value: "3.2", date: "2026-01-01", source: "SEC" }).value).toBe(3.2); expect(() => normalizeObservation({ value: "n.d.", date: "2026-01-01", source: "SEC" })).toThrow(); });
+  it("never converts absent values into zero", () => { expect(() => normalizeObservation({ value: null, date: "2026-01-01", source: "SEC" })).toThrow(/assente/); expect(() => normalizeObservation({ value: "", date: "2026-01-01", source: "SEC" })).toThrow(/assente/); });
 });
