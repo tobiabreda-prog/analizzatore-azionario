@@ -4,7 +4,7 @@ const NOW=new Date("2026-11-13T12:00:00.000Z");
 const source="https://www.sec.gov/Archives/edgar/data/320193/000032019326000026/aapl-20260926.htm";
 const evidence=Object.fromEntries(["riskFree","beta","equityRiskPremium","costOfDebt","taxRate","equityWeight"].map(k=>[k,{
  value:{riskFree:5.10,beta:1.09,equityRiskPremium:4.41,costOfDebt:4.50,taxRate:17,equityWeight:0.98}[k],
- url:source,date:"2026-11-12"
+ url:({riskFree:"https://fred.stlouisfed.org/series/DGS10",beta:"https://www.investing.com/equities/apple-computer-inc",equityRiskPremium:"https://pages.stern.nyu.edu/~adamodar/pc/datasets/ctryprem.xlsx",costOfDebt:source,taxRate:source,equityWeight:source})[k],date:"2026-11-12"
 }]));
 const research={currency:"USD",wacc:9.8,inputs:evidence};
 const quote={ticker:"AAPL",price:250,currency:"USD",asOf:"2026-11-12"};
