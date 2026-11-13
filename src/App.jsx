@@ -132,13 +132,15 @@ export function computeScores(D, tech) {
   const last = tech[tech.length - 1];
   const s50 = num(q?.sma50) ?? last?.s50, s200 = num(q?.sma200) ?? last?.s200, p = num(q?.price);
   const rs = num(q?.rsi14) ?? last?.rsi;
-  const tS = q ? avg([p != null && s200 != null ? (p > s200 ? 100 : 0) : null, p != null && s50 != null ? (p > s50 ? 100 : 0) : null, rs != null ? clamp(100 - Math.abs(rs - 55) * 3) : null, last ? (last.hist > 0 ? 100 : 25) : null]) : null;
+  const tS = q ? avg([p != null && s200 != null ? (p > s200 ? 100 : 0) : null, p != null && s50 != null ? (p > s50 ? 100 : 0) : null, rs != null ? clamp(100 - Math.abs(rs - 55) * 3) : null, last && num(last.hist) != null ? (last.hist > 0 ? 100 : 25) : null]) : null;
   const an = (f?.annual || []).slice().sort((x, y) => x.y - y.y), la = an[an.length - 1], fa = an[0], pa = an[an.length - 2];
   const cagr = la && fa && an.length > 1 && fa.rev > 0 && la.rev > 0 ? (Math.pow(la.rev / fa.rev, 1 / (an.length - 1)) - 1) * 100 : null;
-  const epsG = la && pa && pa.eps > 0 ? (la.eps / pa.eps - 1) * 100 : null;
+  const epsG = la && pa && num(la.eps) != null && num(pa.eps) > 0 ? (la.eps / pa.eps - 1) * 100 : null;
   const gS = avg([sc(cagr, -5, 15), sc(epsG, -10, 20)]);
   const b = f?.balance || {};
-  const nm = la && la.rev ? (la.ni / la.rev) * 100 : null, om = la && la.rev ? (la.op / la.rev) * 100 : null;
+  // Non trasformare NI/EBIT mancanti in margini pari a zero: zero è un dato, null è assenza.
+  const nm = la && num(la.rev) > 0 && num(la.ni) != null ? (la.ni / la.rev) * 100 : null;
+  const om = la && num(la.rev) > 0 && num(la.op) != null ? (la.op / la.rev) * 100 : null;
   const rS = avg([sc(nm, 0, 25), sc(om, 0, 30), sc(b.roe, 0, 25)]);
   const nde = la && la.ebitda > 0 && num(b.netDebt) != null ? b.netDebt / la.ebitda : null;
   const sS = avg([nde != null ? sc(4 - nde, 0, 4) : null, sc(b.currentRatio, 0.8, 2), sc(b.interestCover, 1, 10)]);
