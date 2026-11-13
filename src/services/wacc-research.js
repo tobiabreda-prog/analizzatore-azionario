@@ -57,7 +57,7 @@ export async function researchWacc({symbol,currency,signal}={}){
  const candidates=available.filter(m=>(m.supportedGenerationMethods||[]).includes("generateContent")&&/gemini.*flash/i.test(m.name||"")&&!/lite|preview|exp/i.test(m.name||""));
  const preferred=["gemini-2.5-flash","gemini-2.0-flash"];
  candidates.sort((a,b)=>{
-  const rank=m=>{const n=String(m.name).replace(/^models\\//,"");const i=preferred.indexOf(n);return i<0?preferred.length:i;};
+  const rank=m=>{const n=String(m.name).split("/").pop();const i=preferred.indexOf(n);return i<0?preferred.length:i;};
   return rank(a)-rank(b);
  });
  if(!candidates.length)throw new Error("La tua chiave non espone modelli Gemini Flash compatibili con generateContent.");
