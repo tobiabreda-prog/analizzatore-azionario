@@ -103,6 +103,23 @@ const clamp = (x) => Math.max(0, Math.min(100, x));
 const sc = (x, lo, hi) => (num(x) == null ? null : clamp(((x - lo) / (hi - lo)) * 100));
 const avg = (a) => { const v = a.filter((x) => x != null); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
 const daysOld = (d) => { const t = Date.parse(d); return isNaN(t) ? null : (Date.now() - t) / 864e5; };
+export function buildAnnualMetrics(rows = []) {
+  return (Array.isArray(rows) ? rows : [])
+    .slice()
+    .sort((a, b) => a.y - b.y)
+    .map((row, index, sorted) => {
+      const revenue = num(row?.rev);
+      const previousRevenue = index > 0 ? num(sorted[index - 1]?.rev) : null;
+      return {
+        ...row,
+        gm: revenue > 0 && num(row?.gp) != null ? (row.gp / revenue) * 100 : null,
+        om: revenue > 0 && num(row?.op) != null ? (row.op / revenue) * 100 : null,
+        nm: revenue > 0 && num(row?.ni) != null ? (row.ni / revenue) * 100 : null,
+        g: revenue > 0 && previousRevenue > 0 ? (revenue / previousRevenue - 1) * 100 : null
+      };
+    });
+}
+
 
 const sma = (a, n) => a.map((_, i) => (i < n - 1 ? null : a.slice(i - n + 1, i + 1).reduce((s, x) => s + x, 0) / n));
 const ema = (a, n) => { const k = 2 / (n + 1); let p = null; return a.map((x) => (p = p == null ? x : x * k + p * (1 - k))); };
@@ -430,7 +447,7 @@ export default function AnalizzatoreAzionario() {
     cursor: { fill: dark ? "rgba(148,163,184,0.18)" : "rgba(100,116,139,0.12)", stroke: dark ? C.gray : C.gray },
   };
 
-  const annual = (f?.annual || []).slice().sort((x, y) => x.y - y.y).map((r, i, arr) => ({ ...r, gm: r.rev ? (r.gp / r.rev) * 100 : null, om: r.rev ? (r.op / r.rev) * 100 : null, nm: r.rev ? (r.ni / r.rev) * 100 : null, g: i && arr[i - 1].rev ? (r.rev / arr[i - 1].rev - 1) * 100 : null }));
+  const annual = buildAnnualMetrics(f?.annual || []);
   const bal = f?.balance || {};
   const lvl = (x, lo, hi, inv) => (x == null ? "" : (inv ? x <= lo : x >= hi) ? "text-emerald-500" : (inv ? x >= hi : x <= lo) ? "text-red-500" : "text-amber-500");
   const lastT = tech[tech.length - 1];
