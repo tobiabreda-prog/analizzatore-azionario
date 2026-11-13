@@ -1,5 +1,5 @@
 // Fonti gratuite: Yahoo Finance non ufficiale per la copertura multi-mercato; Alpha Vantage opzionale per dati analisti USA.
-// Gemini non viene usato per cercare dati: interpreta solo i risultati già verificati.
+// Gemini interpreta il report; la ricerca WACC opzionale usa grounding web, con verifica separata delle fonti.
 import { CapacitorHttp } from "@capacitor/core";
 
 const UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36";
@@ -167,7 +167,7 @@ async function yseries(symbol, types, years) {
 const lastVal = (s, k) => { const a = s?.[k]; return a?.length ? a[a.length - 1].v : null; };
 const M = (x) => (num(x) == null ? null : round(x / 1e6, 1));
 
-const ANNUAL_TYPES = ["annualTotalRevenue", "annualNetIncome", "annualEBITDA", "annualGrossProfit", "annualOperatingIncome", "annualDilutedEPS", "annualFreeCashFlow", "annualTotalDebt", "annualNetDebt", "annualStockholdersEquity", "annualCurrentAssets", "annualCurrentLiabilities", "annualInterestExpense", "annualEBIT", "annualTaxRateForCalcs", "annualInvestedCapital"];
+const ANNUAL_TYPES = ["annualTotalRevenue", "annualNetIncome", "annualEBITDA", "annualGrossProfit", "annualOperatingIncome", "annualDilutedEPS", "annualDilutedAverageShares", "annualFreeCashFlow", "annualTotalDebt", "annualNetDebt", "annualStockholdersEquity", "annualCurrentAssets", "annualCurrentLiabilities", "annualInterestExpense", "annualEBIT", "annualTaxRateForCalcs", "annualInvestedCapital"];
 const Q_TYPES = ["quarterlyTotalRevenue", "quarterlyNetIncome", "quarterlyDilutedEPS"];
 
 function buildFin(s) {
@@ -197,6 +197,7 @@ function buildFin(s) {
     annual, quarters,
     balance: {
       netDebt: M(lastVal(s, "annualNetDebt")), totalDebt: M(lastVal(s, "annualTotalDebt")), equity: M(eq),
+       dilutedShares: M(lastVal(s, "annualDilutedAverageShares")), // annual weighted-average diluted shares, millions; not current outstanding
       currentRatio: ca != null && cl ? round(ca / cl, 2) : null,
       interestCover: ebit != null && ie ? round(ebit / Math.abs(ie), 1) : null,
       roe: ni != null && eq > 0 ? round((ni / eq) * 100, 1) : null,
@@ -232,7 +233,20 @@ async function peerSymbols(symbol) {
   } catch (e) { /* peer non disponibili */ }
   return { list: [], via: "" };
 }
-async function buildVal(s, symbol) {
+// Peer requests are optional and deliberately decoupled from basic statements.
+export async function loadPeerValuation(symbol) {
+  let peers=[],sector={},via="";
+  const found=await peerSymbols(symbol);
+  via=found.via;
+  if(found.list.length) {
+    const res=await Promise.allSettled(found.list.map(p=>yseries(p,Object.values(VAL_TYPES),1.2)));
+    const vals=res.map((r,i)=>r.status==="fulfilled"?{name:found.list[i],s:r.value}:null).filter(Boolean);
+    peers=vals.map(p=>({name:p.name,pe:round(lastVal(p.s,VAL_TYPES["P/E"]),1),evEbitda:round(lastVal(p.s,VAL_TYPES["EV/EBITDA"]),1)})).filter(p=>p.pe!=null||p.evEbitda!=null);
+    Object.entries(VAL_TYPES).forEach(([k,t])=>{sector[k]=round(median(vals.map(p=>lastVal(p.s,t))),2);});
+  }
+  return {peers,sector,via};
+}
+async function buildVal(s, symbol, {includePeers=true}={}) {
   const own = {}, hist = {}, dates = {};
   let spans = [];
   Object.entries(VAL_TYPES).forEach(([k, t]) => {
@@ -241,17 +255,7 @@ async function buildVal(s, symbol) {
     const h = histMedian(s[t]);
     if (h) { hist[k] = round(h.v, 2); spans.push(h.span); }
   });
-  let peers = [], sector = {}, via = "";
-  try {
-    const found = await peerSymbols(symbol);
-    via = found.via;
-    if (found.list.length) {
-      const res = await Promise.allSettled(found.list.map((p) => yseries(p, Object.values(VAL_TYPES), 1.2)));
-      const vals = res.map((r, i) => (r.status === "fulfilled" ? { name: found.list[i], s: r.value } : null)).filter(Boolean);
-      peers = vals.map((p) => ({ name: p.name, pe: round(lastVal(p.s, VAL_TYPES["P/E"]), 1), evEbitda: round(lastVal(p.s, VAL_TYPES["EV/EBITDA"]), 1) })).filter((p) => p.pe != null || p.evEbitda != null);
-      Object.entries(VAL_TYPES).forEach(([k, t]) => { sector[k] = round(median(vals.map((p) => lastVal(p.s, t))), 2); });
-    }
-  } catch (e) { /* peer non disponibili */ }
+  let {peers,sector,via}=includePeers?await loadPeerValuation(symbol):{peers:[],sector:{},via:""};
   const metrics = Object.keys(VAL_TYPES).filter((k) => own[k] != null).map((k) => ({ k, v: own[k], sector: sector[k] ?? null, hist5y: hist[k] ?? null, date: dates[k] }));
   return {
     metrics, peers, marketCap: lastVal(s, "trailingMarketCap"),
@@ -262,10 +266,10 @@ async function buildVal(s, symbol) {
 }
 
 // Una sola chiamata a Yahoo per bilanci e multipli (prima erano due)
-export async function loadFundamentals(symbol) {
+export async function loadFundamentals(symbol,options={}) {
   const s = await yseries(symbol, [...ANNUAL_TYPES, ...Q_TYPES, ...Object.values(VAL_TYPES), "trailingMarketCap"], 6);
   const fin = buildFin(s);
-  const val = await buildVal(s, symbol);
+  const val = await buildVal(s, symbol, options);
   return { fin, val };
 }
 
