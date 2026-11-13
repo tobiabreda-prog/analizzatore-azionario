@@ -23,7 +23,7 @@ const download = (name, text) => {
  setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
 
-export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},analysisData=null}){
+export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},analysisData=null,onSelectSymbol=()=>{}}){
  const [symbols,setSymbols] = useState([]);
  const [input,setInput] = useState("");
  const [tab,setTab] = useState("valuation");
@@ -79,15 +79,15 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
    {error&&<div role="alert" className="rounded-lg border border-amber-500/50 p-3 text-sm flex gap-2"><AlertTriangle size={17}/>{error}</div>}
    {notice&&<div role="status" className="rounded-lg border border-emerald-500/50 p-3 text-sm">{notice}</div>}
    {tab==="valuation"&&<div className="space-y-3">
-    <p className={`text-sm ${muted}`}>Il Fair Value utilizza i dati del titolo analizzato e le ipotesi che inserisci. Verifica sempre data e fonte: non è una quotazione in tempo reale.</p>
+    <p className={`text-sm ${muted}`}>Il Fair Value utilizza i dati del titolo selezionato nella watchlist e le ipotesi che inserisci. Verifica sempre data e fonte: non è una quotazione in tempo reale.</p>
     {current&&<button type="button" onClick={()=>{setInput(current);setTab("watchlist");}} className="rounded-lg border px-3 py-2 text-sm flex gap-2 items-center"><Plus size={15}/>Aggiungi {current} alla watchlist</button>}
     <FairValuePanel key={current||"no-symbol"} dark={dark} analysisData={analysisData}/>
    </div>}
    {tab==="watchlist"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}>
-    <div><h2 className="text-lg font-semibold">Watchlist essenziale</h2><p className={`text-xs ${muted}`}>Salva i ticker da seguire. La watchlist non recupera quotazioni automaticamente e non rappresenta un portafoglio con quantità o prezzi di acquisto. Per analizzare un titolo, torna ad Analisi titolo.</p></div>
+    <div><h2 className="text-lg font-semibold">Watchlist essenziale</h2><p className={`text-xs ${muted}`}>Tocca un ticker per aprire direttamente il report e caricare i suoi dati. Tornando su Fair Value, i campi saranno precompilati con i dati disponibili per quel titolo.</p></div>
     <form onSubmit={add} className="flex flex-wrap gap-2"><input aria-label="Ticker" value={input} onChange={e=>setInput(e.target.value)} placeholder="es. AAPL o ENI.MI" className="min-w-0 flex-1 rounded-lg border bg-transparent p-2 text-sm" required/><button type="submit" className="rounded-lg bg-emerald-600 text-white px-4 py-2 flex items-center gap-2 text-sm"><Plus size={16}/>Aggiungi</button></form>
     <div className="flex flex-wrap gap-2"><button type="button" onClick={exportCsv} className="rounded-lg border px-3 py-2 text-sm flex gap-2 items-center"><Download size={15}/>Esporta CSV</button><label className="rounded-lg border px-3 py-2 text-sm flex gap-2 items-center cursor-pointer"><Upload size={15}/>Ripristina CSV<input type="file" accept=".csv,text/csv" className="hidden" onChange={importCsv}/></label></div>
-    {!loaded?<p className={muted}>Caricamento watchlist…</p>:symbols.length===0?<p className={muted}>Nessun titolo salvato.</p>:<ul className="divide-y divide-slate-500/20">{symbols.map(symbol=><li key={symbol} className="flex items-center justify-between py-3 gap-2"><span className="font-semibold">{symbol}</span><button type="button" onClick={()=>remove(symbol)} aria-label={"Rimuovi "+symbol} className="text-red-500 flex gap-1 items-center text-sm"><Trash2 size={16}/>Rimuovi</button></li>)}</ul>}
+    {!loaded?<p className={muted}>Caricamento watchlist…</p>:symbols.length===0?<p className={muted}>Nessun titolo salvato.</p>:<ul className="divide-y divide-slate-500/20">{symbols.map(symbol=><li key={symbol} className="flex items-center justify-between py-3 gap-2"><button type="button" onClick={()=>onSelectSymbol(symbol)} aria-label={"Analizza "+symbol} className="font-semibold text-left flex-1 min-w-0 rounded-lg px-2 py-2 hover:bg-emerald-500/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500"><span className="underline decoration-emerald-500/50">{symbol}</span><span className={`block text-xs font-normal ${muted}`}>Apri report e Fair Value</span></button><button type="button" onClick={()=>remove(symbol)} aria-label={"Rimuovi "+symbol} className="text-red-500 flex gap-1 items-center text-sm"><Trash2 size={16}/>Rimuovi</button></li>)}</ul>}
     <p className={`text-xs ${muted}`}>Il backup CSV contiene soltanto i ticker della watchlist. I precedenti movimenti di portafoglio restano nei dati locali della vecchia console, ma non sono mostrati qui.</p>
    </section>}
   </div>

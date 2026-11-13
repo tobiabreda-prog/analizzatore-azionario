@@ -474,7 +474,7 @@ export default function AnalizzatoreAzionario() {
 
   const cfColor = (n) => (n == null || isNaN(n) ? "" : n > 0 ? "text-emerald-500" : n < 0 ? "text-red-500" : "");
 
-  if (showV2) return <V2Console dark={dark} onBack={() => setShowV2(false)} onSettings={() => { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); setShowKey(true); setShowV2(false); }} analysisData={data} analysisScore={S} />;
+  if (showV2) return <V2Console onSelectSymbol={(symbol) => { setShowV2(false); setInput(symbol); run(symbol, false, false); }} dark={dark} onBack={() => setShowV2(false)} onSettings={() => { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); setShowKey(true); setShowV2(false); }} analysisData={data} analysisScore={S} />;
 
   return (
     <div className={`app-shell min-h-screen ${th.bg} ${dark ? "theme-dark" : "theme-light"}`}>
