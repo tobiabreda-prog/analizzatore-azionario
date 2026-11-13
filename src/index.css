@@ -118,3 +118,37 @@ body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inse
 @media (prefers-reduced-motion:reduce) {
   *,*::before,*::after { scroll-behavior:auto !important; transition:none !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; }
 }
+
+/* ===== Tema "Porcellino": turchese, crema, marrone caldo, bottoni verde/corallo ===== */
+.app-shell { --pig-teal:#bfe9e6; --pig-cream:#fbf1dc; --pig-brown:#7a3a26; --pig-green:#5f9e45; --pig-coral:#d8604f; }
+.app-shell.theme-light {
+  background-color:#bfe9e6;
+  background-image:radial-gradient(ellipse at 10% 0%,rgba(255,255,255,.55),transparent 30rem),radial-gradient(ellipse at 95% 12%,rgba(255,182,203,.28),transparent 26rem);
+  color:#3d2a22;
+}
+.theme-light .app-brand-title { color:var(--pig-brown); }
+.theme-light .app-brand-title span { color:var(--pig-green); }
+.theme-light .app-kicker { color:#2f8f8c; }
+.theme-light .app-brand-icon { box-shadow:0 8px 20px rgba(45,111,115,.35); border:2px solid rgba(255,255,255,.7); }
+.theme-light .app-action-button { background:var(--pig-cream); border:2px solid #7cc6c5; color:var(--pig-brown); }
+.theme-light .app-workspace-button { color:var(--pig-green); }
+.theme-light .app-hero { background:linear-gradient(120deg,#fbf1dc 0%,#f7e6c4 100%); border:2px solid #7cc6c5; color:var(--pig-brown); box-shadow:0 14px 34px rgba(45,111,115,.22); }
+.theme-light .app-hero:after { background:radial-gradient(circle at 78% 45%,rgba(255,170,198,.35),transparent 20rem); }
+.theme-light .app-hero-eyebrow { color:#2f8f8c; }
+.theme-light .app-hero h2 span { color:var(--pig-green); }
+.theme-light .app-hero-copy p { color:#6b4a3c; }
+.theme-light .app-hero-tags span { background:#fff8e8; color:var(--pig-brown); border-color:#e5c9a0; }
+.theme-light .app-hero-orbit { border-color:rgba(122,198,197,.6); }
+.theme-light .app-hero-caption { background:var(--pig-cream); border-color:#e5c9a0; box-shadow:0 6px 14px rgba(122,58,38,.15); }
+.theme-light .app-hero-caption b { color:var(--pig-coral); }
+.theme-light .app-hero-caption span { color:var(--pig-brown); }
+.theme-light .app-search-panel { background:var(--pig-cream); border:2px solid #7cc6c5; }
+.theme-light .app-search-button { background:linear-gradient(180deg,#78b95b,#5f9e45) !important; box-shadow:0 4px 0 #497d33; }
+.theme-light .app-ticker-chip { background:#fff8e8; border-color:#e5c9a0; color:var(--pig-brown); }
+.theme-light .app-quick-label { color:#8a6a58; }
+.theme-light .app-card { background:var(--pig-cream) !important; border:2px solid #7cc6c5 !important; color:#3d2a22; }
+.theme-light .workspace-shell { background-color:#bfe9e6; }
+/* Tema scuro: stessa palette, versione notte */
+.theme-dark .app-brand-title span, .theme-dark .app-hero h2 span { color:#ffb3c8; }
+.theme-dark .app-search-button { background:linear-gradient(180deg,#78b95b,#5f9e45) !important; box-shadow:0 4px 0 #3e6b2d; }
+.theme-dark .app-brand-icon { border:2px solid rgba(255,255,255,.18); }
