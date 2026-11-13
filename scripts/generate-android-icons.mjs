@@ -79,13 +79,13 @@ await fs.promises.writeFile(path.join(valuesDir, "ic_launcher_background.xml"), 
 
 // Collega esplicitamente l'icona generata all'app Android.
 let manifest = fs.readFileSync(manifestPath, "utf8");
-if (!/<application\\b/.test(manifest)) throw new Error("Tag application non trovato in AndroidManifest.xml");
+if (!/<application(?:\s|>)/.test(manifest)) throw new Error("Tag application non trovato in AndroidManifest.xml");
 if (!/android:icon="[^"]+"/.test(manifest)) throw new Error("Attributo android:icon non trovato nel manifest");
 manifest = manifest.replace(/android:icon="[^"]+"/, 'android:icon="@mipmap/ic_launcher"');
 if (/android:roundIcon="[^"]+"/.test(manifest)) {
   manifest = manifest.replace(/android:roundIcon="[^"]+"/, 'android:roundIcon="@mipmap/ic_launcher_round"');
 } else {
-  manifest = manifest.replace(/android:icon="@mipmap\\/ic_launcher"/, 'android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"');
+  manifest = manifest.replace('android:icon="@mipmap/ic_launcher"', 'android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"');
 }
 fs.writeFileSync(manifestPath, manifest);
 
