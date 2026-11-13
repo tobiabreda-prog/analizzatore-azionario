@@ -1,6 +1,5 @@
-// Fonti dati gratuite per l'analizzatore (nessuna ricerca web di Gemini).
-// - Yahoo Finance (non ufficiale, senza chiave): prezzi, storico, bilanci, multipli, notizie. Copre anche i titoli europei (es. ENI.MI).
-// - Finnhub (ufficiale, chiave gratuita OPZIONALE): rating e target price degli analisti, peer e notizie per i titoli USA.
+// Fonti gratuite: Yahoo Finance non ufficiale per la copertura multi-mercato; Alpha Vantage opzionale per dati analisti USA.
+// Gemini non viene usato per cercare dati: interpreta solo i risultati già verificati.
 import { CapacitorHttp } from "@capacitor/core";
 
 const UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36";
@@ -209,7 +208,7 @@ function buildFin(s) {
 const VAL_TYPES = { "P/E": "trailingPeRatio", "P/E forward": "trailingForwardPeRatio", PEG: "trailingPegRatio", "P/B": "trailingPbRatio", "P/S": "trailingPsRatio", "EV/EBITDA": "trailingEnterprisesValueEBITDARatio" };
 const median = (a) => { const v = a.filter((x) => x != null && x > 0).sort((x, y) => x - y); if (v.length < 2) return null; const m = Math.floor(v.length / 2); return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2; };
 
-// ---------- Finnhub (opzionale) ----------
+// ---------- Peer e comparabili da fonte non ufficiale ----------
 const isUS = (sym) => !/[.:]/.test(sym);
 
 // Storico: mediana dei valori trimestrali degli ultimi 5 anni, ricavata dalle serie gia' scaricate (nessuna chiamata in piu').
@@ -220,7 +219,7 @@ function histMedian(series) {
   return { v: median(pts.map((e) => e.v)), span: (Date.parse(pts[pts.length - 1].d) - Date.parse(pts[0].d)) / (365 * 864e5) };
 }
 
-// Titoli simili per il confronto di settore: Finnhub (USA, con chiave) oppure Yahoo "simili" (qualsiasi mercato, senza chiave).
+// Titoli simili per il confronto di settore: Yahoo Finance (fonte non ufficiale).
 async function peerSymbols(symbol) {
   try {
     const r = await yget(`/v6/finance/recommendationsbysymbol/${encodeURIComponent(symbol)}`, {});
@@ -266,7 +265,7 @@ export async function loadFundamentals(symbol) {
   return { fin, val };
 }
 
-// ---------- Analisti: Yahoo Finance (cookie + crumb), poi Finnhub come complemento ----------
+// ---------- Analisti: Yahoo Finance, Alpha Vantage come fallback USA ----------
 let crumbCache = null;
 export function resetYahooSession() { crumbCache = null; } // per i test
 const hdr = (h, name) => { const k = Object.keys(h || {}).find((x) => x.toLowerCase() === name); const v = k ? h[k] : ""; return Array.isArray(v) ? v.join(", ") : String(v || ""); };
@@ -339,8 +338,7 @@ async function alphaOverview(symbol, key) {
 }
 const avNum = (x) => { const n = Number(x); return x != null && x !== "None" && x !== "" && isFinite(n) ? n : null; };
 
-// Ordine delle fonti: 1) Yahoo (cookie + crumb: target medio/min/max e rating, anche titoli europei),
-// 2) Finnhub e 3) Alpha Vantage solo per titoli USA e solo per ciò che manca.
+// Yahoo Finance è la fonte primaria; Alpha Vantage è un fallback limitato ai titoli USA.
 export async function loadAnalysts(symbol, _unusedKey, avKey) {
   const out = { targetMean: null, targetMin: null, targetMax: null, ratings: { buy: 0, hold: 0, sell: 0 }, nAnalysts: 0, asOf: new Date().toISOString().slice(0, 10), source: "n.d." };
   const sources = [], reasons = [];
@@ -487,8 +485,8 @@ export async function diagnostics(_unusedKey, avKey) {
     try { const d = await fn(); out.push({ name, ok: true, detail: d || "OK" }); }
     catch (e) {
       const m = e.message;
-      const warn = /limite giornaliero|HTTP 403|HTTP 401/.test(m) && /Finnhub|Alpha/.test(name + m);
-      out.push({ name, ok: false, warn, detail: warn ? (/403|401/.test(m) ? "non incluso nel piano gratuito Finnhub (normale, il rating funziona)" : m.slice(0, 160) + " - riprova domani") : m.slice(0, 220) });
+      const warn = /limite giornaliero|HTTP 403|HTTP 401/.test(m) && /Alpha/.test(name + m);
+      out.push({ name, ok: false, warn, detail: warn ? (/403|401/.test(m) ? "endpoint non disponibile nel piano gratuito o accesso negato" : m.slice(0, 160) + " - riprova domani") : m.slice(0, 220) });
     }
   };
   await t("Yahoo: prezzi AAPL", async () => { const c = await chartFor("AAPL"); return `${c.rows.length} giorni, ultimo ${c.rows[c.rows.length - 1].date}`; });
