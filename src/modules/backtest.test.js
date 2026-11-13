@@ -47,3 +47,28 @@ describe("Fineco transaction costs",()=>{
     })).toThrow(/minimo di 5.000/);
   });
 });
+
+describe("backtest data integrity and execution timing",()=>{
+  const daily=[
+    {date:"2026-01-05",close:100},
+    {date:"2026-01-06",close:101},
+    {date:"2026-01-07",close:102},
+    {date:"2026-01-08",close:103}
+  ];
+  it("executes a signal generated at one close on the following bar",()=>{
+    const result=runLongOnlyBacktest({
+      bars:daily,
+      signals:[{date:"2026-01-05",position:1},{date:"2026-01-07",position:0}],
+      initialCapital:10000,fixedFee:0,feeBps:0,slippageBps:0,minNotional:0
+    });
+    expect(result.trades.map(x=>[x.date,x.side])).toEqual([
+      ["2026-01-06","BUY"],["2026-01-08","SELL"]
+    ]);
+    expect(result.finalValue).toBeGreaterThan(10000);
+  });
+  it("rejects duplicate dates and signals outside the test interval",()=>{
+    const duplicate=[...daily,{date:"2026-01-08",close:104}];
+    expect(()=>runLongOnlyBacktest({bars:duplicate,signals:[],initialCapital:10000,minNotional:0})).toThrow(/date duplicate/);
+    expect(()=>runLongOnlyBacktest({bars:daily,signals:[{date:"2026-01-09",position:1}],initialCapital:10000,minNotional:0})).toThrow(/fuori dall'intervallo/);
+  });
+});
