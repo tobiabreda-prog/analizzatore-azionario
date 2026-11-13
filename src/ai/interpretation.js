@@ -11,7 +11,7 @@ export async function requestGeminiInterpretation({apiKey,verifiedFacts,fetchImp
   const model="gemini-3.5-flash-lite";
   if(!apiKey) throw new Error("Chiave Gemini non configurata");
   const prompt="Interpreta esclusivamente i dati JSON verificati forniti. Non inventare numeri, date, consensus, fonti o eventi. Se un dato manca, scrivi missingData. Non calcolare metriche. Restituisci JSON con summary (string), risks (array string), catalysts (array string), missingData (array string). Dati: "+JSON.stringify(verifiedFacts);
-  const url="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent?key="+encodeURIComponent(apiKey);
+  const url="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent";
   const response=await fetchImpl(url,{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:"application/json"}})});
   if(!response.ok) throw new Error("Gemini HTTP "+response.status);
   const json=await response.json();
