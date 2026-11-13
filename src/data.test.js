@@ -27,4 +27,23 @@ describe("Yahoo daily quote normalization",()=>{
     expect(quote.priceType).toBe("daily_close");
     expect(quote.asOf).toBe("2026-11-12");
   });
+
+  it("does not invent high, low or volume values when the provider omits them",async()=>{
+    const timestamps=[
+      Math.floor(Date.UTC(2026,10,11,21,0,0)/1000),
+      Math.floor(Date.UTC(2026,10,12,21,0,0)/1000)
+    ];
+    setHttp(async()=>({
+      status:200,
+      data:{chart:{result:[{
+        meta:{currency:"USD",symbol:"TEST",regularMarketPrice:999,gmtoffset:0},
+        timestamp:timestamps,
+        indicators:{quote:[{close:[100,110],high:[null,null],low:[null,null],volume:[null,null]}]}
+      }],error:null}}
+    }));
+    const quote=await loadQuote("TEST");
+    expect(quote.support).toEqual([null,null]);
+    expect(quote.resistance).toEqual([null,null]);
+    expect(quote.history.at(-1)[2]).toBeNull();
+  });
 });
