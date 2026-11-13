@@ -14,9 +14,27 @@ const validDate=s=>typeof s==="string"&&/^20\d{2}-\d{2}-\d{2}$/.test(s)&&Number.
 const daysBetween=(a,b)=>(Date.parse(b)-Date.parse(a))/86400000;
 const percent=(n,min,max)=>finite(n)&&n>=min&&n<=max;
 const evidenceKeys=["riskFree","beta","equityRiskPremium","costOfDebt","taxRate","equityWeight"];
+const validatedHost=(url,key)=>{
+ try{
+  const u=new URL(url);
+  if(u.protocol!=="https:")return false;
+  const host=u.hostname.toLowerCase();
+  const is=domain=>host===domain||host.endsWith("."+domain);
+  const federal=is("federalreserve.gov")||is("treasury.gov")||is("stlouisfed.org")||is("ecb.europa.eu");
+  const filing=is("sec.gov")||is("annualreports.com");
+  const market=is("investing.com");
+  const damodaran=is("stern.nyu.edu");
+  if(key==="riskFree")return federal;
+  if(key==="beta")return market;
+  if(key==="equityRiskPremium")return damodaran;
+  if(key==="costOfDebt"||key==="taxRate")return filing;
+  if(key==="equityWeight")return market||filing;
+  return false;
+ }catch{return false;}
+};
 const evidenceValid=research=>evidenceKeys.every(k=>{
  const item=research?.inputs?.[k];
- return item&&finite(item.value)&&typeof item.url==="string"&&/^https:\/\/[^/]+/.test(item.url)&&validDate(item.date);
+ return item&&finite(item.value)&&validatedHost(item.url,k)&&validDate(item.date);
 });
 const annualFCFF=row=>{
  if(!row || !finite(row.operatingCashFlow) || !finite(row.capitalExpenditure) ||
