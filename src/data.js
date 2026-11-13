@@ -117,7 +117,8 @@ export async function loadQuote(input) {
   const { meta, rows } = got;
   const closes = rows.map((r) => r.close);
   const n = rows.length;
-  const price = num(meta.regularMarketPrice) ?? closes[n - 1];
+  const price = closes[n - 1];
+  // Allinea il prezzo esposto alla data dell'ultima barra daily: regularMarketPrice può essere intraday e avere un timestamp diverso.
   const prev = closes[n - 2];
   const l20 = rows.slice(-20), l60 = rows.slice(-60);
   const lo = (a) => Math.min(...a.map((r) => r.low)), hi = (a) => Math.max(...a.map((r) => r.high));
@@ -131,6 +132,7 @@ export async function loadQuote(input) {
     changePct: prev ? round((price / prev - 1) * 100, 2) : null,
     marketCap: null,
     asOf: rows[n - 1].date,
+    priceType: "daily_close",
     source: "Yahoo Finance",
     sma50: round(smaLast(closes, 50), 3),
     sma200: round(smaLast(closes, 200), 3),
