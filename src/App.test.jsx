@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeScores } from "./App.jsx";
+import { buildAnnualMetrics, computeScores } from "./App.jsx";
 
 function history(count=60){
   return Array.from({length:count},(_,i)=>{
@@ -41,5 +41,26 @@ describe("financial scoring missing-value handling",()=>{
   it("does not calculate EPS growth when the latest EPS is missing",()=>{
     const result=computeScores(dataset(10),tech);
     expect(result.derived.epsG).toBeNull();
+  });
+});
+
+describe("annual statement display metrics",()=>{
+  it("keeps missing gross profit, operating profit and net income margins unavailable",()=>{
+    const rows=buildAnnualMetrics([{y:2025,rev:100,gp:null,op:null,ni:null}]);
+    expect(rows[0].gm).toBeNull();
+    expect(rows[0].om).toBeNull();
+    expect(rows[0].nm).toBeNull();
+  });
+  it("preserves genuine zero values and calculates growth only with both revenues",()=>{
+    const rows=buildAnnualMetrics([
+      {y:2024,rev:100,gp:0,op:0,ni:0},
+      {y:2025,rev:110,gp:22,op:11,ni:5},
+      {y:2026,rev:null,gp:1,op:1,ni:1}
+    ]);
+    expect(rows[0].gm).toBe(0);
+    expect(rows[0].nm).toBe(0);
+    expect(rows[1].nm).toBeCloseTo(100*5/110);
+    expect(rows[1].g).toBeCloseTo(10);
+    expect(rows[2].g).toBeNull();
   });
 });
