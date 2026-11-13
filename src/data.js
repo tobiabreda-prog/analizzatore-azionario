@@ -210,12 +210,6 @@ const VAL_TYPES = { "P/E": "trailingPeRatio", "P/E forward": "trailingForwardPeR
 const median = (a) => { const v = a.filter((x) => x != null && x > 0).sort((x, y) => x - y); if (v.length < 2) return null; const m = Math.floor(v.length / 2); return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2; };
 
 // ---------- Finnhub (opzionale) ----------
-async function fh(path, params, key) {
-  const qs = new URLSearchParams({ ...params, token: key }).toString();
-  const r = await httpGet(`https://finnhub.io/api/v1${path}?${qs}`);
-  if (r.status !== 200) throw new Error(`Finnhub ${path} HTTP ${r.status}`);
-  return r.data;
-}
 const isUS = (sym) => !/[.:]/.test(sym);
 
 // Storico: mediana dei valori trimestrali degli ultimi 5 anni, ricavata dalle serie gia' scaricate (nessuna chiamata in piu').
@@ -227,22 +221,15 @@ function histMedian(series) {
 }
 
 // Titoli simili per il confronto di settore: Finnhub (USA, con chiave) oppure Yahoo "simili" (qualsiasi mercato, senza chiave).
-async function peerSymbols(symbol, fhKey) {
-  if (fhKey && isUS(symbol)) {
-    try {
-      const list = (await fh("/stock/peers", { symbol }, fhKey)).filter((p) => p !== symbol && isUS(p)).slice(0, 5);
-      if (list.length >= 2) return { list, via: "Finnhub" };
-    } catch (e) { /* passa a Yahoo */ }
-  }
+async function peerSymbols(symbol) {
   try {
     const r = await yget(`/v6/finance/recommendationsbysymbol/${encodeURIComponent(symbol)}`, {});
     const list = (r.data?.finance?.result?.[0]?.recommendedSymbols || []).map((x) => x?.symbol).filter((p) => p && p !== symbol).slice(0, 6);
     if (r.status === 200 && list.length >= 2) return { list, via: "Yahoo" };
-  } catch (e) { /* nessun peer */ }
+  } catch (e) { /* peer non disponibili */ }
   return { list: [], via: "" };
 }
-
-async function buildVal(s, symbol, fhKey) {
+async function buildVal(s, symbol) {
   const own = {}, hist = {}, dates = {};
   let spans = [];
   Object.entries(VAL_TYPES).forEach(([k, t]) => {
@@ -253,7 +240,7 @@ async function buildVal(s, symbol, fhKey) {
   });
   let peers = [], sector = {}, via = "";
   try {
-    const found = await peerSymbols(symbol, fhKey);
+    const found = await peerSymbols(symbol);
     via = found.via;
     if (found.list.length) {
       const res = await Promise.allSettled(found.list.map((p) => yseries(p, Object.values(VAL_TYPES), 1.2)));
@@ -272,10 +259,10 @@ async function buildVal(s, symbol, fhKey) {
 }
 
 // Una sola chiamata a Yahoo per bilanci e multipli (prima erano due)
-export async function loadFundamentals(symbol, fhKey) {
+export async function loadFundamentals(symbol) {
   const s = await yseries(symbol, [...ANNUAL_TYPES, ...Q_TYPES, ...Object.values(VAL_TYPES), "trailingMarketCap"], 6);
   const fin = buildFin(s);
-  const val = await buildVal(s, symbol, fhKey);
+  const val = await buildVal(s, symbol);
   return { fin, val };
 }
 
@@ -354,63 +341,38 @@ const avNum = (x) => { const n = Number(x); return x != null && x !== "None" && 
 
 // Ordine delle fonti: 1) Yahoo (cookie + crumb: target medio/min/max e rating, anche titoli europei),
 // 2) Finnhub e 3) Alpha Vantage solo per titoli USA e solo per ciò che manca.
-export async function loadAnalysts(symbol, fhKey, avKey) {
+export async function loadAnalysts(symbol, _unusedKey, avKey) {
   const out = { targetMean: null, targetMin: null, targetMax: null, ratings: { buy: 0, hold: 0, sell: 0 }, nAnalysts: 0, asOf: new Date().toISOString().slice(0, 10), source: "n.d." };
-  const srcs = [], why = [];
-  const ratingsTot = () => out.ratings.buy + out.ratings.hold + out.ratings.sell;
+  const sources = [], reasons = [];
+  const ratingsTotal = () => out.ratings.buy + out.ratings.hold + out.ratings.sell;
 
   try {
     const y = await yahooAnalysts(symbol);
     let used = false;
     if (y.targetMean != null) { out.targetMean = y.targetMean; out.targetMin = y.targetMin; out.targetMax = y.targetMax; used = true; }
-    const tot = y.ratings.buy + y.ratings.hold + y.ratings.sell;
-    if (tot > 0) { out.ratings = y.ratings; used = true; }
-    out.nAnalysts = tot > 0 ? tot : y.nOpinions || 0;
-    if (used) srcs.push("Yahoo Finance"); else why.push("Yahoo: nessun dato per questo titolo");
-  } catch (e) { why.push("Yahoo: " + e.message.slice(0, 220)); }
+    const total = y.ratings.buy + y.ratings.hold + y.ratings.sell;
+    if (total > 0) { out.ratings = y.ratings; used = true; }
+    out.nAnalysts = total > 0 ? total : y.nOpinions || 0;
+    if (used) sources.push("Yahoo Finance"); else reasons.push("Yahoo: nessun dato per questo titolo");
+  } catch (e) { reasons.push("Yahoo: " + e.message.slice(0, 160)); }
 
-  if (fhKey && isUS(symbol) && (out.targetMean == null || ratingsTot() === 0)) {
-    let used = false;
-    if (ratingsTot() === 0) {
-      try {
-        const r = (await fh("/stock/recommendation", { symbol }, fhKey))?.[0];
-        if (r) {
-          out.ratings = { buy: (r.strongBuy || 0) + (r.buy || 0), hold: r.hold || 0, sell: (r.sell || 0) + (r.strongSell || 0) };
-          out.nAnalysts = ratingsTot(); if (r.period) out.asOf = r.period; used = true;
-        }
-      } catch (e) { why.push("Finnhub rating: " + e.message.slice(0, 40)); }
-    }
-    if (out.targetMean == null && store.get("fh_pt_denied") !== "1") {
-      try {
-        const pt = await fh("/stock/price-target", { symbol }, fhKey);
-        const m = num(pt?.targetMean) ?? num(pt?.targetMedian);
-        if (m != null) { out.targetMean = m; out.targetMin = num(pt?.targetLow); out.targetMax = num(pt?.targetHigh); used = true; }
-      } catch (e) {
-        if (/HTTP 40[13]/.test(e.message)) store.set("fh_pt_denied", "1"); // il target non e' nel piano gratuito: non insistere
-        why.push("Finnhub target: " + e.message.slice(0, 40));
-      }
-    }
-    if (used) srcs.push("Finnhub");
-  }
-
-  if (avKey && isUS(symbol) && (out.targetMean == null || ratingsTot() === 0)) {
+  if (avKey && isUS(symbol) && (out.targetMean == null || ratingsTotal() === 0)) {
     try {
-      const o = await alphaOverview(symbol, avKey);
+      const overview = await alphaOverview(symbol, avKey);
       let used = false;
-      if (out.targetMean == null && avNum(o.AnalystTargetPrice) != null) { out.targetMean = avNum(o.AnalystTargetPrice); used = true; }
-      if (ratingsTot() === 0) {
-        const c = ["AnalystRatingStrongBuy", "AnalystRatingBuy", "AnalystRatingHold", "AnalystRatingSell", "AnalystRatingStrongSell"].map((k) => avNum(o[k]) || 0);
-        const tot = c.reduce((x, y) => x + y, 0);
-        if (tot > 0) { out.ratings = { buy: c[0] + c[1], hold: c[2], sell: c[3] + c[4] }; out.nAnalysts = tot; used = true; }
+      if (out.targetMean == null && avNum(overview.AnalystTargetPrice) != null) { out.targetMean = avNum(overview.AnalystTargetPrice); used = true; }
+      if (ratingsTotal() === 0) {
+        const counts = ["AnalystRatingStrongBuy", "AnalystRatingBuy", "AnalystRatingHold", "AnalystRatingSell", "AnalystRatingStrongSell"].map((key) => avNum(overview[key]) || 0);
+        const total = counts.reduce((sum, value) => sum + value, 0);
+        if (total > 0) { out.ratings = { buy: counts[0] + counts[1], hold: counts[2], sell: counts[3] + counts[4] }; out.nAnalysts = total; used = true; }
       }
-      if (used) srcs.push("Alpha Vantage");
-    } catch (e) { why.push("Alpha Vantage: " + e.message.slice(0, 50)); }
+      if (used) sources.push("Alpha Vantage");
+    } catch (e) { reasons.push("Alpha Vantage: " + e.message.slice(0, 80)); }
   }
 
-  out.source = srcs.length ? srcs.join(" + ") : "n.d." + (why.length ? ` (${why.join("; ")})` : "");
+  out.source = sources.length ? sources.join(" + ") : "n.d." + (reasons.length ? ` (${reasons.join("; ")})` : "");
   return out;
 }
-
 
 function yahooRawDate(x) {
   const n = raw(x);
@@ -519,7 +481,7 @@ export async function loadNewsRaw(symbol) {
 }
 
 // ---------- Diagnostica ----------
-export async function diagnostics(fhKey, avKey) {
+export async function diagnostics(_unusedKey, avKey) {
   const out = [];
   const t = async (name, fn) => {
     try { const d = await fn(); out.push({ name, ok: true, detail: d || "OK" }); }
@@ -536,12 +498,6 @@ export async function diagnostics(fhKey, avKey) {
   await t("Yahoo: analisti AAPL (target e rating)", async () => { const y = await yahooAnalysts("AAPL"); return y.targetMean != null ? `target medio ${round(y.targetMean)}, ${y.ratings.buy + y.ratings.hold + y.ratings.sell} rating` : "accesso ok ma target vuoti"; });
   await t("Yahoo: analisti ENI.MI", async () => { const y = await yahooAnalysts("ENI.MI"); return y.targetMean != null ? `target medio ${round(y.targetMean)}` : "accesso ok ma target vuoti"; });
   await t("Yahoo: indice S&P 500", async () => { const m = await loadMarket("AAPL", (await chartFor("AAPL")).rows.map((r) => [r.date, r.close])); return m.index ? `12 mesi: ${m.index.r52}%` : "indice non letto"; });
-  if (fhKey) {
-    await t("Finnhub: rating AAPL", async () => { const r = await fh("/stock/recommendation", { symbol: "AAPL" }, fhKey); return `${r?.length || 0} periodi`; });
-    await t("Finnhub: target AAPL", async () => { if (store.get("fh_pt_denied") === "1") return "non incluso nel piano gratuito (normale, gia' verificato)"; const r = await fh("/stock/price-target", { symbol: "AAPL" }, fhKey); return r?.targetMean ? `media ${r.targetMean}` : "vuoto"; });
-  } else {
-    out.push({ name: "Finnhub", ok: false, detail: "chiave non inserita (opzionale)" });
-  }
   if (avKey) {
     await t("Alpha Vantage: target AAPL", async () => { const o = await alphaOverview("AAPL", avKey); return avNum(o.AnalystTargetPrice) != null ? `target medio ${o.AnalystTargetPrice}` : "titolo letto, ma senza target"; });
   } else {
