@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { valueScenarios } from "../modules/fair-value.js";
+import { researchWacc } from "../services/wacc-research.js";
 
 const num=(v)=>v.trim()===""?null:Number(v);
 const pct=(v)=>Number(v)/100;
@@ -35,9 +36,21 @@ export default function FairValuePanel({dark=false,analysisData=null}){
  const setNetDebt=v=>setOverrides(x=>({...x,netDebt:v}));
  const setShares=v=>setOverrides(x=>({...x,shares:v}));
  const setPrice=v=>setOverrides(x=>({...x,price:v}));
+ const [waccResearch,setWaccResearch]=useState(null);
+ const [researchBusy,setResearchBusy]=useState(false);
+ const [researchError,setResearchError]=useState("");
  const [result,setResult]=useState(null);
  const [error,setError]=useState("");
- const reset=()=>{setOverrides({});setResult(null);setError("");};
+ const reset=()=>{setOverrides({});setWaccResearch(null);setResearchError("");setResult(null);setError("");};
+ const runResearch=async()=>{
+  setResearchBusy(true);setResearchError("");setWaccResearch(null);
+  try{
+   const symbol=String(analysisData?.quote?.ticker||analysisData?.quote?.symbol||"").toUpperCase();
+   const found=await researchWacc({symbol,currency});
+   setWaccResearch(found);setWacc(String(found.wacc));setResult(null);
+  }catch(e){setResearchError(e.message||"Ricerca WACC non riuscita.");}
+  finally{setResearchBusy(false);}
+ };
  const muted=dark?"text-slate-400":"text-slate-500";
  const field=dark?"bg-slate-950 border-slate-700":"bg-white border-slate-300";
  const calculate=(e)=>{
@@ -62,6 +75,9 @@ export default function FairValuePanel({dark=false,analysisData=null}){
    <p className={`text-xs ${muted}`}>Compilazione automatica dai bilanci caricati. FCF: mediana dei FCF positivi degli ultimi 3 esercizi; crescita: CAGR storico con almeno 3 osservazioni, limitato tra −5% e +12%, altrimenti 5%. WACC 9% e crescita terminale 2,5% sono ipotesi standard modificabili, non dati di mercato.</p>
    <p className={`text-xs ${muted}`}>Ultimo esercizio: {latestFcfYear??"n.d."} · Fonte: {analysisData?.fin?.source||"non specificata"} · Debito netto: {Number.isFinite(debt)?"disponibile":"mancante"}.</p>
    <p className="text-xs text-amber-600">Azioni: {Number.isFinite(impliedShares)?"stima da capitalizzazione ÷ prezzo (NON azioni diluite certificate); verificare con il bilancio":"dato non disponibile: inserire il numero verificato"}. I dati mancanti non vengono inventati. Importi finanziari in milioni, capitalizzazione in unità intere, stessa valuta.</p>
+   <div className="flex flex-wrap gap-2"><button type="button" disabled={researchBusy} onClick={runResearch} className="rounded-lg bg-emerald-600 text-white px-3 py-2 text-xs disabled:opacity-50">{researchBusy?"Ricerca Gemini in corso…":"Stima WACC con Gemini e fonti web"}</button></div>
+   {researchError&&<p role="alert" className="text-xs text-amber-600">{researchError} Il WACC non è stato modificato.</p>}
+   {waccResearch&&<div className="rounded-lg border p-3 space-y-2"><p className="text-sm font-semibold">WACC calcolato: {waccResearch.wacc.toFixed(2)}% · Costo equity: {waccResearch.costOfEquity.toFixed(2)}%</p><p className="text-xs">Ricerca assistita da Gemini. Verificare sempre fonti, periodo e coerenza del modello prima di investire.</p><ul className="text-xs space-y-1">{Object.entries(waccResearch.inputs).map(([name,item])=><li key={name}>{name}: {item.value} · {item.date} · <a href={item.url} target="_blank" rel="noopener noreferrer" className="underline">Fonte</a></li>)}</ul></div>}
    <button type="button" onClick={reset} className="rounded-lg border px-3 py-2 text-xs">Ripristina valori suggeriti</button>
   </div>
   <form onSubmit={calculate} className="grid grid-cols-2 sm:grid-cols-3 gap-3">
