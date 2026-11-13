@@ -15,7 +15,8 @@ export function classifyMacroRegime(rows=[],now=new Date()){
  const vix=usable.VIXCLS,hy=usable.BAMLH0A0HYM2,curve=usable.T10Y2Y;
  const stress=(finite(vix)&&vix>=30)||(finite(hy)&&hy>=6)||(finite(curve)&&curve<=-0.5);
  const caution=(finite(vix)&&vix>=22)||(finite(hy)&&hy>=4)||(finite(curve)&&curve<0);
- const regime=stress?"risk_off":caution?"cautious":"risk_on";
+ const riskIndicatorsComplete=finite(vix)&&finite(hy)&&finite(curve);
+ const regime=stress?"risk_off":caution?"cautious":riskIndicatorsComplete?"risk_on":"mixed";
  const drivers=[];
  if(finite(vix))drivers.push("VIX "+vix.toFixed(1)+(vix>=30?": volatilità elevata":vix>=22?": volatilità in aumento":": volatilità contenuta"));
  if(finite(hy))drivers.push("High-yield spread "+hy.toFixed(2)+"%");
