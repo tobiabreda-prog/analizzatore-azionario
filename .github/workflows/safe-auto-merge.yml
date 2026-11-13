@@ -1,0 +1,104 @@
+name: Safe auto-merge and Android APK
+# Runs only after the read-only Quality checks workflow completes.
+# NEVER checks out or executes pull-request code with a write token.
+on:
+  workflow_run:
+    workflows: ["Quality checks"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: safe-auto-merge-main
+  cancel-in-progress: false
+
+jobs:
+  merge-and-build:
+    if: >-
+      ${{ github.event.workflow_run.event == 'pull_request' &&
+          github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Verify trusted PR, exact tested commit and safe file paths
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          run=$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID")
+          pr_number=$(jq -r '.pull_requests[0].number // empty' <<< "$run")
+          if [[ -z "$pr_number" ]]; then
+            echo "No associated pull request; skipping."
+            exit 0
+          fi
+          pr=$(gh api "repos/$GH_REPO/pulls/$pr_number")
+          author=$(jq -r '.user.login' <<< "$pr")
+          head_repo=$(jq -r '.head.repo.full_name' <<< "$pr")
+          branch=$(jq -r '.head.ref' <<< "$pr")
+          sha=$(jq -r '.head.sha' <<< "$pr")
+          base=$(jq -r '.base.ref' <<< "$pr")
+          state=$(jq -r '.state' <<< "$pr")
+          draft=$(jq -r '.draft' <<< "$pr")
+          if [[ "$author" != "tobiabreda-prog" || "$head_repo" != "$GH_REPO" ||
+                "$base" != "main" || "$state" != "open" || "$draft" != "false" ||
+                "$sha" != "$RUN_SHA" ]]; then
+            echo "PR is not eligible or has changed since tests; manual review required."
+            exit 0
+          fi
+          if [[ ! "$branch" =~ ^(fix|feat|ui)/[a-zA-Z0-9._/-]+$ ]]; then
+            echo "Branch is not on the approved automation list."
+            exit 0
+          fi
+          files=$(gh api --paginate "repos/$GH_REPO/pulls/$pr_number/files?per_page=100" --jq '.[].filename')
+          if [[ -z "$files" ]]; then exit 0; fi
+          while IFS= read -r file; do
+            case "$file" in
+              src/*.jsx|src/*.js|src/*.css|src/*/*.jsx|src/*/*.js|src/*/*.css|src/*/*/*.jsx|src/*/*/*.js|tests/*.js|tests/*/*.js|tests/*/*/*.js)
+                ;;
+              *)
+                echo "Sensitive or unapproved path: $file; manual merge required."
+                exit 0
+                ;;
+            esac
+          done <<< "$files"
+          # Explicitly disallow source files capable of modifying the build pipeline.
+          if grep -E '(^|/)(package(-lock)?\.json|vite\.config\.|capacitor\.config\.|\.env|scripts/|\.github/|android/)' <<< "$files"; then
+            echo "Sensitive change; manual merge required."
+            exit 0
+          fi
+          echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Eligible PR #$pr_number at tested commit $sha"
+
+      - name: Merge only the exact successful commit
+        if: steps.gate.outputs.number != ''
+        id: merge
+        shell: bash
+        env:
+          PR_NUMBER: ${{ steps.gate.outputs.number }}
+          PR_SHA: ${{ steps.gate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # GitHub refuses the merge if SHA changed or branch rules are not satisfied.
+          if gh api -X PUT "repos/$GH_REPO/pulls/$PR_NUMBER/merge" \
+            -f merge_method=squash -f sha="$PR_SHA" -f commit_title="Auto-merge PR #$PR_NUMBER after quality checks"; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Merge blocked by GitHub; leaving PR for manual review."
+          fi
+
+      - name: Build Android debug APK from main
+        if: steps.merge.outputs.merged == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # workflow_dispatch is an allowed follow-on trigger with GITHUB_TOKEN.
+          gh workflow run android-debug.yml --ref main
+          echo "Android debug APK build dispatched on main."
