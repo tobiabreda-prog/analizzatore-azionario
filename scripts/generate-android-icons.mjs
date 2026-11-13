@@ -15,6 +15,7 @@ for (const [density, size] of Object.entries(densities)) {
   const png = await sharp(svg).resize(size, size).png().toBuffer();
   await fs.promises.writeFile(path.join(dir, "ic_launcher.png"), png);
   await fs.promises.writeFile(path.join(dir, "ic_launcher_round.png"), png);
+  await fs.promises.writeFile(path.join(dir, "ic_launcher_foreground.png"), png);
 }
 
 // Android 8+ usa le icone adaptive: aggiorna anche foreground/background,
@@ -23,8 +24,6 @@ const adaptiveDir = path.join(resourceRoot, "mipmap-anydpi-v26");
 const valuesDir = path.join(resourceRoot, "values");
 fs.mkdirSync(adaptiveDir, { recursive: true });
 fs.mkdirSync(valuesDir, { recursive: true });
-const foreground = await sharp(svg).resize(432, 432).png().toBuffer();
-await fs.promises.writeFile(path.join(resourceRoot, "mipmap-xxxhdpi", "ic_launcher_foreground.png"), foreground);
 await fs.promises.writeFile(path.join(adaptiveDir, "ic_launcher.xml"), `<?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background"/>
