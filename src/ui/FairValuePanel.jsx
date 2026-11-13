@@ -146,6 +146,7 @@ export default function FairValuePanel({dark=false,analysisData=null}){
      <p className="text-xs">Scenari: {autoStatus.result.valuation.scenarios.map(x=>x.name+" "+money(x.valuePerShare,currency)).join(" · ")}</p>
      <p className="text-xs">Crescita FCF ipotizzata: {autoStatus.result.assumptions.modelGrowth.toFixed(2)}% · WACC documentato: {autoStatus.result.assumptions.wacc.toFixed(2)}% · g terminale ipotizzata: {autoStatus.result.assumptions.terminalGrowth.toFixed(2)}%.</p>
      <p className="text-xs">Fonte bilanci: {autoStatus.result.assumptions.source}. {autoStatus.result.warning}</p>
+     <details className="text-xs rounded-lg border p-2"><summary className="cursor-pointer font-semibold">Fonti del WACC · 6 parametri</summary><ul className="mt-2 space-y-1">{Object.entries(autoStatus.result.assumptions.waccEvidence).map(([key,v])=><li key={key}>{key}: {v.value} ({v.date}) · <a href={v.url} target="_blank" rel="noopener noreferrer" className="underline">Fonte dichiarata</a></li>)}</ul><p className="mt-2 text-amber-600">La presenza di un URL non garantisce da sola che la cifra sia corretta: confrontare con il documento originale.</p></details>
    </div>}
    </div>
   <details className="rounded-lg border p-3">
