@@ -344,17 +344,17 @@ export default function AnalizzatoreAzionario() {
     setData({...acc});updateNotices();
     setCachedAt(!force&&snapshot.fresh.includes("quote")&&snapshot.fresh.includes("fin")?(snapshot.timestamps.quote||null):null);
     setStep(acc.quote&&acc.fin&&acc.val?STEPS.length:0);
-    const section=async(key,fetcher)=>{
-      const cached=!force?readAnalysisSection(target,key):null;
+    const section=async(key,fetcher,cacheSymbol=target)=>{
+      const cached=!force?readAnalysisSection(cacheSymbol,key):null;
       if(cached){acc[key]=cached.value;clearNotice(key);publish();return cached.value;}
       try {
         const value=await fetcher();
         if(!active())return null;
-        if(value!==null&&value!==undefined)put(key,value);
+        if(value!==null&&value!==undefined)put(key,value,cacheSymbol);
         return value;
       } catch(e) {
         if(!active())return null;
-        const old=readAnalysisSection(target,key,{allowStale:true});
+        const old=readAnalysisSection(cacheSymbol,key,{allowStale:true});
         if(old)acc[key]=old.value;else delete acc[key];
         warn(key,key+": "+(old?"uso ultima copia salvata, ":"dati non disponibili, ")+String(e.message||e).slice(0,100));
         publish();
@@ -391,10 +391,10 @@ export default function AnalizzatoreAzionario() {
       const core=fundamental();
       // Optional requests start concurrently and update their own sections on completion.
       const extras=[
-        section("events",()=>loadCorporateEvents(sym)),
-        section("an",()=>loadAnalysts(sym,"",getApiKey("alphavantage").trim())),
-        section("mkt",()=>loadMarket(sym,quote.history)),
-        section("newsRaw",()=>loadNewsRaw(sym)),
+        section("events",()=>loadCorporateEvents(sym),sym),
+        section("an",()=>loadAnalysts(sym,"",getApiKey("alphavantage").trim()),sym),
+        section("mkt",()=>loadMarket(sym,quote.history),sym),
+        section("newsRaw",()=>loadNewsRaw(sym),sym),
       ];
       const peers=(async()=>{
         const cached=!force?readAnalysisSection(sym,"peers"):null;
@@ -523,7 +523,7 @@ export default function AnalizzatoreAzionario() {
 
   const cfColor = (n) => (n == null || isNaN(n) ? "" : n > 0 ? "text-emerald-500" : n < 0 ? "text-red-500" : "");
 
-  if (showV2) return <V2Console onSelectSymbol={(symbol) => { setShowV2(false); setInput(symbol); run(symbol, false, false); }} dark={dark} onBack={() => setShowV2(false)} onSettings={() => { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); setShowKey(true); setShowV2(false); }} analysisData={data} analysisScore={S} />;
+  if (showV2) return <V2Console initialTab={workspaceTab} onSelectSymbol={(symbol) => { setShowV2(false); setInput(symbol); run(symbol, false, false); }} dark={dark} onBack={() => setShowV2(false)} onSettings={() => { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); setShowKey(true); setShowV2(false); }} analysisData={data} analysisScore={S} />;
 
   return (
     <div className={`app-shell min-h-screen ${th.bg} ${dark ? "theme-dark" : "theme-light"}`}>
@@ -538,7 +538,7 @@ export default function AnalizzatoreAzionario() {
             </div>
           </div>
           <div className="app-actions">
-            <button onClick={() => setShowV2(true)} className="app-action-button app-workspace-button" aria-label="Apri workspace 2.0"><TrendingUp size={16} /><span>Workspace 2.0</span></button>
+            <button onClick={() => {setWorkspaceTab("watchlist");setShowV2(true);}} className="app-action-button app-workspace-button" aria-label="Apri workspace 2.0"><TrendingUp size={16} /><span>Workspace 2.0</span></button>
             <button onClick={() => { if (!showKey) { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); } setShowKey(!showKey); }} className="app-action-button" aria-label="Impostazioni fonti dati"><Key size={16} /></button>
             <button onClick={() => { const nd = !dark; setDark(nd); setThemeFixed(true); try { localStorage.setItem("theme", nd ? "dark" : "light"); } catch (e) {} }} className="app-action-button" aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
           </div>
@@ -631,6 +631,12 @@ export default function AnalizzatoreAzionario() {
             {POPULAR_TICKERS.slice(0, 8).map((item) => <button type="button" key={item.ticker} onClick={() => { setInput(item.ticker); run(item.ticker); }} className="app-ticker-chip"><b>{item.ticker}</b><span>{item.name}</span></button>)}
           </div>
         )}
+        <nav aria-label="Navigazione rapida" className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => {setWorkspaceTab("watchlist");setShowV2(true);}} className={`px-3 py-2 rounded-lg border text-sm ${th.card}`}>Watchlist</button>
+          <button type="button" disabled={!q} onClick={() => {setWorkspaceTab("valuation");setShowV2(true);}} className={`px-3 py-2 rounded-lg border text-sm disabled:opacity-50 ${th.card}`}>Fair Value{q?.ticker?" · "+q.ticker:""}</button>
+          <span className={`self-center text-xs ${th.mute}`}>Report: {cur||"seleziona un ticker"}</span>
+        </nav>
+
         {hist.length > 0 && (
           <div className="flex flex-wrap gap-1.5 items-center text-xs">
             <span className={th.mute}>Recenti:</span>
@@ -644,6 +650,7 @@ export default function AnalizzatoreAzionario() {
             <div className={`h-2 rounded mt-2 overflow-hidden ${dark ? "bg-slate-800" : "bg-slate-200"}`}><div className="h-full bg-emerald-500 transition-all" style={{ width: `${((step + 0.5) / STEPS.length) * 100}%` }} /></div>
           </div>
         )}
+        {aiBusy && q && <p role="status" className={`rounded-lg border px-3 py-2 text-xs ${th.card}`}>Il report è consultabile. Il commento Gemini viene elaborato separatamente…</p>}
         {err && (
           <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-3 flex flex-wrap items-center gap-3 text-sm">
             <AlertTriangle className="text-red-500" size={18} /><span className="flex-1 min-w-0 break-words">{err}</span>
@@ -652,7 +659,7 @@ export default function AnalizzatoreAzionario() {
         )}
 
         {cachedAt && step === STEPS.length && (
-          <div className={`rounded-xl border p-2 text-xs flex items-center gap-2 ${th.card}`}><Clock size={13} />Dati salvati alle {new Date(cachedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}: nessuna nuova richiesta. Tocca "Aggiorna dati" per ricaricare.</div>
+          <div className={`rounded-xl border p-2 text-xs flex items-center gap-2 ${th.card}`}><Clock size={13} />Quotazione e bilanci disponibili nella cache locale (salvati alle {new Date(cachedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}). Gli altri dati vengono verificati separatamente.</div>
         )}
 
         {warns.length > 0 && (
