@@ -10,14 +10,15 @@ const money=(v,currency)=>{if(!Number.isFinite(v))return "n.d.";try{return curre
 export default function FairValuePanel({dark=false,analysisData=null}){
  const currency=analysisData?.quote?.currency||"";
  const symbol=String(analysisData?.quote?.ticker||analysisData?.quote?.symbol||"").toUpperCase();
- const savedWacc=useMemo(()=>readAnalysisSection(symbol,"wacc")?.value||null,[symbol]);
+ const savedWacc=useMemo(()=>{const candidate=readAnalysisSection(symbol,"wacc")?.value;return candidate?.currency===currency?candidate:null;},[symbol,currency]);
  const annual=useMemo(()=>[...(analysisData?.fin?.annual||[])].filter(x=>Number.isFinite(x?.y)).sort((a,b)=>a.y-b.y),[analysisData]);
  const latestAnnual=annual.at(-1);
  const latestFcfYear=latestAnnual?.y;
  const recentFcfs=annual.slice(-3).map(x=>x.fcf).filter(x=>Number.isFinite(x)&&x>0);
- const fcf=recentFcfs.length?[...recentFcfs].sort((a,b)=>a-b)[Math.floor(recentFcfs.length/2)]:null;
+ const fcf=recentFcfs.length>=2?[...recentFcfs].sort((a,b)=>a-b)[Math.floor(recentFcfs.length/2)]:null;
  const history=annual.slice(-5).filter(x=>Number.isFinite(x.fcf)&&x.fcf>0);
- const cagr=history.length>=3?Math.pow(history.at(-1).fcf/history[0].fcf,1/(history.length-1))-1:null;
+ const yearSpan=history.length>=3?history.at(-1).y-history[0].y:0;
+ const cagr=history.length>=3&&yearSpan>=2?Math.pow(history.at(-1).fcf/history[0].fcf,1/yearSpan)-1:null;
  const suggestedGrowth=cagr===null?5:Math.max(-5,Math.min(12,cagr*100));
  const debt=analysisData?.fin?.balance?.netDebt;
  const marketCap=analysisData?.quote?.marketCap??analysisData?.val?.marketCap;
@@ -68,7 +69,7 @@ export default function FairValuePanel({dark=false,analysisData=null}){
   setResearchBusy(true);setResearchError("");setWaccResearch(null);
   try{
    const found=await researchWacc({symbol,currency});
-   writeAnalysisSection(symbol,"wacc",found);
+   writeAnalysisSection(symbol,"wacc",{...found,currency});
    setWaccResearch(found);setOfflineResult(null);setWacc(String(found.wacc));setResult(null);
   }catch(e){setResearchError(e.message||"Ricerca WACC non riuscita.");}
   finally{setResearchBusy(false);}
@@ -94,7 +95,7 @@ export default function FairValuePanel({dark=false,analysisData=null}){
  };
  return <section className="rounded-xl border p-4 space-y-4">
   <div className="space-y-2"><h2 className="text-lg font-semibold">Fair Value · DCF a scenari</h2>
-   <p className={`text-xs ${muted}`}>Compilazione automatica dai bilanci caricati. FCF base: mediana dei FCF positivi degli ultimi 3 esercizi; crescita: CAGR storico con almeno 3 osservazioni, limitato tra −5% e +12%, altrimenti 5%. WACC non precompilato: deve essere stimato con parametri verificati (anche senza Gemini). Crescita terminale 2,5% è un’ipotesi standard modificabile, non un dato di mercato.</p>
+   <p className={`text-xs ${muted}`}>Compilazione automatica dai bilanci caricati. FCF base: mediana dei FCF positivi degli ultimi 3 esercizi (almeno due valori positivi); crescita: CAGR storico con almeno 3 osservazioni, limitato tra −5% e +12%, altrimenti 5%. WACC non precompilato: deve essere stimato con parametri verificati (anche senza Gemini). Crescita terminale 2,5% è un’ipotesi standard modificabile, non un dato di mercato.</p>
    <p className={`text-xs ${muted}`}>Ultimo esercizio: {latestFcfYear??"n.d."} · Fonte: {analysisData?.fin?.source||"non specificata"} · Debito netto: {Number.isFinite(debt)?"disponibile":"mancante"}.</p>
    <p className="text-xs text-amber-600">Azioni: {Number.isFinite(reportedShares)&&reportedShares>0?"media annua diluita riportata dal provider (non numero corrente certo); verificare con il bilancio":Number.isFinite(impliedShares)?"solo stima indicativa da capitalizzazione ÷ prezzo: "+impliedShares.toFixed(2)+" mln. Inserire le azioni diluite verificate: la stima non viene applicata automaticamente":"dato mancante: inserire azioni diluite verificate"}. Importi in milioni e nella valuta del titolo. La data del bilancio può differire dalla data del prezzo.</p>
    <details className="rounded-lg border p-3 space-y-3" open>
