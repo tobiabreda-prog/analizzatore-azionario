@@ -12,6 +12,7 @@ import FairValuePanel from "./FairValuePanel.jsx";
 import { runLongOnlyBacktest } from "../modules/backtest.js";
 import { buildSmaCrossSignals } from "../modules/strategies.js";
 import { analyzeRisk } from "../core/risk-engine.js";
+import { MIN_INVESTMENT_NOTIONAL, FINECO_DEFAULT_FEES, defaultFinecoFee, ITALIAN_FTT_BPS_2026 } from "../modules/trading-costs.js";
 
 const STORE="aa2_workspace_v1";
 const today=()=>new Date().toISOString().slice(0,10);
@@ -27,7 +28,7 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null,an
  const [quantity,setQuantity]=useState("1");
  const [price,setPrice]=useState("");
  const [currency,setCurrency]=useState("EUR");
- const [fees,setFees]=useState("19.00");
+ const [fees,setFees]=useState(String(defaultFinecoFee("EUR")));
  const [portfolioTaxes,setPortfolioTaxes]=useState("0");
  const [tradeDate,setTradeDate]=useState(today());
  const [eventType,setEventType]=useState("earnings");
@@ -48,7 +49,7 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null,an
  const [initialCapital,setInitialCapital]=useState("10000");
  const [feeBps,setFeeBps]=useState("0");
  const [commissionPreset,setCommissionPreset]=useState("US");
- const [fixedFee,setFixedFee]=useState("12.95");
+ const [fixedFee,setFixedFee]=useState(String(FINECO_DEFAULT_FEES.USD));
  const [buyTaxBps,setBuyTaxBps]=useState("0");
  const [slippageBps,setSlippageBps]=useState("5");
  const [marketIndicators,setMarketIndicators]=useState(null);
@@ -103,11 +104,11 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null,an
   {tab==="backtest"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}>
    <div><h2 className="text-lg font-semibold">Backtest SMA 20/50</h2><p className={`text-xs ${muted}`}>Simulazione long-only sullo storico daily. Segnale alla chiusura di t, eseguito alla chiusura di t+1. Preset Fineco per operatività non frequente: USA 12,95 USD per eseguito; Italia 19,00 EUR per eseguito. La Tobin Tax è separata e va selezionata solo se applicabile allo strumento.</p></div>
    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-    <label className="text-xs space-y-1">Mercato / profilo commissioni<select value={commissionPreset} onChange={e=>{const v=e.target.value;setCommissionPreset(v);setFixedFee(v==="US"?"12.95":v==="IT"?"19.00":"0");setBuyTaxBps("0");}} className="w-full rounded-lg border p-2 bg-transparent text-sm"><option value="US">USA · USD 12,95</option><option value="IT">Italia · EUR 19,00</option><option value="CUSTOM">Personalizzato</option></select></label>
-    <label className="text-xs space-y-1">Capitale iniziale (controvalore minimo 5.000 + costi)<input type="number" min="5000" step="any" value={initialCapital} onChange={e=>setInitialCapital(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
+    <label className="text-xs space-y-1">Mercato / profilo commissioni<select value={commissionPreset} onChange={e=>{const v=e.target.value;setCommissionPreset(v);setFixedFee(String(v==="US"?FINECO_DEFAULT_FEES.USD:v==="IT"?FINECO_DEFAULT_FEES.EUR:0));setBuyTaxBps("0");}} className="w-full rounded-lg border p-2 bg-transparent text-sm"><option value="US">USA · USD 12,95</option><option value="IT">Italia · EUR 19,00</option><option value="CUSTOM">Personalizzato</option></select></label>
+    <label className="text-xs space-y-1">Capitale iniziale (controvalore minimo 5.000 + costi)<input type="number" min={MIN_INVESTMENT_NOTIONAL} step="any" value={initialCapital} onChange={e=>setInitialCapital(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
     <label className="text-xs space-y-1">Commissione fissa per eseguito ({commissionPreset==="US"?"USD":commissionPreset==="IT"?"EUR":"valuta titolo"})<input type="number" min="0" step="0.01" value={fixedFee} onChange={e=>setFixedFee(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">Tobin Tax acquisto<select value={buyTaxBps} disabled={commissionPreset!=="IT"} onChange={e=>setBuyTaxBps(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm disabled:opacity-40"><option value="0">Non applicata / non dovuta</option><option value="20">Italia · mercato regolamentato · 0,20%</option><option value="40">Italia · OTC · 0,40%</option></select></label>
-    <p className={`col-span-full text-xs ${muted}`}>Nel 2026 la Tobin Tax sulle azioni italiane è in generale 0,20% su mercati regolamentati e 0,40% fuori mercato, ma si applica solo agli strumenti/emittenti soggetti e sul saldo netto giornaliero. Verifica l’addebito effettivo Fineco; il backtest applica la percentuale selezionata al singolo acquisto come stima semplificata.</p>
+    <label className="text-xs space-y-1">Tobin Tax acquisto<select value={buyTaxBps} disabled={commissionPreset!=="IT"} onChange={e=>setBuyTaxBps(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm disabled:opacity-40"><option value="0">Non applicata / non dovuta</option><option value={String(ITALIAN_FTT_BPS_2026.REGULATED)}>Italia · mercato regolamentato/MTF · 0,20%</option><option value={String(ITALIAN_FTT_BPS_2026.OTC)}>Italia · fuori mercato · 0,40%</option></select></label>
+    <p className={`col-span-full text-xs ${muted}`}>Dal 1° gennaio 2026 le aliquote sono 0,20% su mercati regolamentati/MTF e 0,40% fuori mercato. L’imposta riguarda in via generale gli acquisti di azioni emesse da società residenti in Italia; per le quotate conta la capitalizzazione media di novembre dell’anno precedente (soglia 500 milioni di euro). ETF/ETC e obbligazioni sono esclusi; esistono ulteriori esenzioni. L’imposta è sul saldo netto giornaliero per singolo titolo. Verifica sempre l’addebito Fineco: qui è una stima semplificata sul singolo acquisto, senza netting né verifica automatica dell’emittente.</p>
     <label className="text-xs space-y-1">Commissione variabile (bps)<input type="number" min="0" step="1" value={feeBps} onChange={e=>setFeeBps(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
     <label className="text-xs space-y-1">Slippage per lato (bps)<input type="number" min="0" step="1" value={slippageBps} onChange={e=>setSlippageBps(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
    </div>
@@ -129,13 +130,13 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null,an
    <p className={`text-xs ${muted}`}>I prezzi sono chiusure giornaliere. Prima di usarli per un'analisi verifica data, borsa, valuta e disponibilità del simbolo presso il provider. Nessun prezzo viene automaticamente attribuito al portafoglio.</p>
   </section>}
   {tab==="portfolio"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}><div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="text-lg font-semibold">Registro movimenti</h2><p className={`text-xs ${muted}`}>Inserimento manuale o import CSV. Il sistema calcola costo medio e P&L realizzato; non valorizza le posizioni senza quotazioni verificate.</p></div><div className="flex flex-wrap gap-2"><label className="rounded-lg border px-3 py-2 text-xs flex items-center gap-2 cursor-pointer"><Upload size={14}/>Importa CSV<input type="file" accept=".csv,text/csv" onChange={importTradeCsv} className="hidden"/></label><button type="button" onClick={exportTradesCsv} className="rounded-lg border px-3 py-2 text-xs flex items-center gap-2"><Download size={14}/>Esporta CSV</button></div></div>
-   <p className={`text-xs ${muted}`}>Parametri commissioni indicativi per operatività non frequente, modificabili in base al tuo contratto Fineco. Per i nuovi acquisti il workspace richiede un controvalore minimo di 5.000 EUR o USD. Le commissioni sono preimpostate a 19,00 EUR o 12,95 USD in base alla valuta; inserisci separatamente l’imposta effettivamente addebitata, se dovuta.</p>
+   <p className={`text-xs ${muted}`}>Parametri Fineco per operatività non frequente, modificabili in base al tuo piano: 19,00 EUR per eseguito Italia e 12,95 USD per eseguito USA. La commissione è conteggiata sia in acquisto sia in vendita. Per ogni nuovo acquisto il workspace richiede almeno 5.000 EUR o USD di controvalore. Per altre valute il preset è zero: inserisci manualmente la commissione effettiva. Inserisci separatamente le imposte effettivamente addebitate.</p>
    <form onSubmit={addTrade} className="grid grid-cols-2 sm:grid-cols-4 gap-3">
     <label className="text-xs space-y-1">Ticker<input required value={ticker} onChange={e=>setTicker(e.target.value)} placeholder="es. ENI.MI" className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
     <label className="text-xs space-y-1">Operazione<select value={side} onChange={e=>setSide(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"><option value="BUY">Acquisto</option><option value="SELL">Vendita</option></select></label>
     <label className="text-xs space-y-1">Quantità<input required type="number" min="0.000001" step="any" value={quantity} onChange={e=>setQuantity(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
     <label className="text-xs space-y-1">Prezzo unitario<input required type="number" min="0.000001" step="any" value={price} onChange={e=>setPrice(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
-    <label className="text-xs space-y-1">Valuta<select value={currency} onChange={e=>{const v=e.target.value;setCurrency(v);if(v==="EUR")setFees("19.00");else if(v==="USD")setFees("12.95");else setFees("0");}} className="w-full rounded-lg border p-2 bg-transparent text-sm"><option>EUR</option><option>USD</option><option>GBP</option><option>CHF</option><option>JPY</option></select></label>
+    <label className="text-xs space-y-1">Valuta<select value={currency} onChange={e=>{const v=e.target.value;setCurrency(v);setFees(String(defaultFinecoFee(v)));}} className="w-full rounded-lg border p-2 bg-transparent text-sm"><option>EUR</option><option>USD</option><option>GBP</option><option>CHF</option><option>JPY</option></select></label>
     <label className="text-xs space-y-1">Commissioni broker (preset indicativi: EUR 19,00 / USD 12,95)<input type="number" min="0" step="any" value={fees} onChange={e=>setFees(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
     <label className="text-xs space-y-1">Imposte (inserisci l’addebito effettivo)<input type="number" min="0" step="any" value={portfolioTaxes} onChange={e=>setPortfolioTaxes(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
     <label className="text-xs space-y-1">Data<input type="date" required value={tradeDate} onChange={e=>setTradeDate(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm"/></label>
