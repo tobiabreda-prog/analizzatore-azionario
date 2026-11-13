@@ -1,7 +1,7 @@
 # Guida operativa — workspace 2.0
 
 ## Stato e avvertenze
-Il workspace 2.0 è una versione sperimentale. La scheda Mercati interroga Alpha Vantage per prezzi giornalieri; la scheda Macro interroga cinque serie FRED. Non sono dati realtime e non coprono tutti gli strumenti o le borse. Gli eventi societari inseriti manualmente restano non confermati. I risultati non sono raccomandazioni d'investimento.
+Il workspace 2.0 è una versione sperimentale. La scheda Mercati interroga Alpha Vantage per prezzi giornalieri; la scheda Macro interroga cinque serie FRED. Non sono dati realtime e non coprono tutti gli strumenti o le borse. La scheda Earnings & Dividendi mostra anche la prossima data utili, stime EPS/ricavi, storico sorprese e metriche dividendo provenienti dal feed Yahoo Finance dell'analisi principale; sono dati non ufficiali da verificare. Gli eventi inseriti manualmente restano non confermati. I risultati non sono raccomandazioni d'investimento.
 
 ## Avvio web
 1. Installare Node.js 22 LTS.
