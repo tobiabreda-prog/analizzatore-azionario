@@ -76,6 +76,8 @@ body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inse
 .app-ticker-chip:hover { border-color:#19b99b; transform:translateY(-1px); }
 .app-ticker-chip b { font-size:.68rem; }
 .app-ticker-chip span { max-width:120px; overflow:hidden; color:#8295a2; font-size:.58rem; text-overflow:ellipsis; white-space:nowrap; }
+.app-source-badge { color:#0369a1; background:rgba(14,165,233,.10); }
+.theme-dark .app-source-badge { color:#7dd3fc; background:rgba(14,165,233,.14); }
 .app-card { border-color:rgba(148,163,184,.2) !important; border-radius:19px !important; box-shadow:0 10px 30px rgba(15,40,55,.045); }
 .theme-dark .app-card { background:rgba(12,29,44,.92) !important; border-color:rgba(148,163,184,.16) !important; box-shadow:0 12px 28px rgba(0,0,0,.12); }
 .workspace-shell { background-image:radial-gradient(ellipse at 12% 0%,rgba(28,177,153,.09),transparent 32rem); }
