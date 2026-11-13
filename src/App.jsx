@@ -6,6 +6,7 @@ import { assessAnalysisReadiness } from "./core/analysis-gate.js";
 import V2Console from "./ui/V2Console.jsx";
 import { getApiKey, saveApiKey } from "./services/api-settings.js";
 import { readAnalysisSection, readAnalysisSnapshot, writeAnalysisSection, analysisFingerprint } from "./services/analysis-cache.js";
+import { listGeminiModels } from "./services/gemini-models.js";
 import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key, Printer } from "lucide-react";
 
 const POPULAR_TICKERS = [
@@ -32,69 +33,37 @@ function parseJSON(txt) {
   } catch (e) { return null; }
 }
 
-async function callGeminiAPI(systemInstruction, userPrompt) {
-  let apiKey = "";
-  apiKey = getApiKey("gemini");
-  if (!apiKey) throw new Error("Chiave API Gemini mancante: inseriscila con l'icona della chiave in alto.");
-  const model = "gemini-3.5-flash-lite";
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-  
-  const payload = {
-    contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-    systemInstruction: { parts: [{ text: systemInstruction }] },
-    generationConfig: { responseMimeType: "application/json", temperature: 0.3, maxOutputTokens: 3072 }
+async function callGeminiAPI(systemInstruction,userPrompt) {
+  const apiKey=getApiKey("gemini");
+  if(!apiKey)throw new Error("Chiave Gemini mancante: inseriscila nelle impostazioni.");
+  const models=(await listGeminiModels(apiKey)).filter(m=>/flash/i.test(m.name)).slice(0,4);
+  if(!models.length)throw new Error("Nessun modello Gemini Flash disponibile per questa chiave.");
+  const payload={
+    contents:[{role:"user",parts:[{text:userPrompt}]}],
+    systemInstruction:{parts:[{text:systemInstruction}]},
+    generationConfig:{responseMimeType:"application/json",temperature:0.3,maxOutputTokens:3072}
   };
-
-  // Nessun Search grounding: Gemini interpreta solo i dati già verificati.
-
-  let delay = 1000;
-  let rateRetried = false;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  let lastError="Nessun modello compatibile.";
+  for(const model of models){
+    const url="https://generativelanguage.googleapis.com/v1beta/"+model.name+":generateContent";
+    let response;
     try {
-      const response = await fetch(apiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify(payload)
-      });
-
-      if (response.status === 429) {
-        const body = await response.text();
-        let msg = body;
-        try { msg = JSON.parse(body).error?.message || body; } catch (e) {}
-        const m = body.match(/"retryDelay":\s*"(\d+(?:\.\d+)?)s"/) || msg.match(/retry in (\d+(?:\.\d+)?)s/i);
-        const wait = m ? Math.ceil(parseFloat(m[1])) : null;
-        if (!rateRetried && wait != null && wait <= 65) {
-          rateRetried = true;
-          await new Promise((res) => setTimeout(res, (wait + 1) * 1000));
-          continue;
-        }
-        const e = new Error("Limite di richieste Google (429)" + (wait != null ? ` — riprova tra circa ${wait}s` : "") + ". Dettaglio: " + msg.slice(0, 400));
-        e.noRetry = true;
-        throw e;
-      }
-      if (!response.ok) {
-        throw new Error(`Errore HTTP ${response.status}: ${await response.text()}`);
-      }
-
-      const result = await response.json();
-      const candidate = result.candidates?.[0];
-      const text = candidate?.content?.parts?.[0]?.text;
-      
-      if (!text) {
-        throw new Error("Risposta vuota o non valida ricevuta dal modello.");
-      }
-
-      const parsed = parseJSON(text);
-      if (!parsed) {
-        throw new Error("Impossibile interpretare il JSON restituito.");
-      }
-      return parsed;
-    } catch (err) {
-      if (err.noRetry || attempt === 3 || /mancante|HTTP 40[0-3]/.test(err.message)) throw err;
-      await new Promise((res) => setTimeout(res, delay));
-      delay *= 2;
+      response=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},body:JSON.stringify(payload)});
+    }catch(e){throw new Error("Rete Gemini non raggiungibile: "+String(e.message||e));}
+    if(response.status===429)throw new Error("Quota Gemini esaurita (429): il report numerico rimane disponibile; riprova più tardi.");
+    if(!response.ok){
+      const detail=await response.json().catch(()=>({}));
+      lastError=model.name+": HTTP "+response.status+" "+String(detail.error?.message||"").slice(0,160);
+      if(response.status===400||response.status===404)continue;
+      throw new Error(lastError);
     }
+    const answer=await response.json();
+    const text=(answer.candidates?.[0]?.content?.parts||[]).map(p=>p.text||"").join("");
+    const parsed=parseJSON(text);
+    if(!parsed)throw new Error("JSON Gemini non interpretabile: report numerico non modificato.");
+    return parsed;
   }
+  throw new Error("Nessun modello Gemini utilizzabile: "+lastError);
 }
 
 const nf = (n, d = 2) => (n == null || isNaN(n) ? "n.d." : Number(n).toLocaleString("it-IT", { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -291,19 +260,14 @@ export default function AnalizzatoreAzionario() {
   const [testMsg, setTestMsg] = useState("");
   const [testing, setTesting] = useState(false);
   const testKey = async () => {
-    setTesting(true); setTestMsg("Verifica del modello gratuito in corso…");
+    setTesting(true);setTestMsg("Verifica dei modelli disponibili…");
     try {
-      const k = keyVal.trim();
-      if (!k) throw new Error("Inserisci prima la chiave Gemini.");
-      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent", {
-        method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": k },
-        body: JSON.stringify({ contents: [{ parts: [{ text: '{"ok":true}' }] }], generationConfig: { responseMimeType: "application/json", maxOutputTokens: 32 } })
-      });
-      const body = await r.text();
-      if (!r.ok) throw new Error("Gemini HTTP " + r.status + ": " + body.slice(0, 240));
-      setTestMsg("Chiave valida: gemini-3.5-flash-lite risponde correttamente. Il piano gratuito ha limiti di utilizzo.");
-    } catch (e) { setTestMsg("Test non riuscito: " + e.message); }
-    finally { setTesting(false); }
+      const k=keyVal.trim();
+      if(!k)throw new Error("Inserisci prima la chiave Gemini.");
+      const models=await listGeminiModels(k);
+      setTestMsg("Chiave riconosciuta: "+models.length+" modelli generateContent disponibili. L'accesso alla ricerca web e le quote si verificano durante la richiesta reale.");
+    }catch(e){setTestMsg("Test non riuscito: "+String(e.message||e));}
+    finally{setTesting(false);}
   };
   const [keyVal, setKeyVal] = useState(() => getApiKey("gemini"));
   const busy = step >= 0 && step < STEPS.length;
