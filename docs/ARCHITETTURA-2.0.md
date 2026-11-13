@@ -1,7 +1,7 @@
 # Analizzatore Azionario 2.0 — architettura e criteri
 
 ## Stato
-Questa è la fondazione incrementale della versione 2.0. L'app legacy resta inalterata. I nuovi moduli sono isolati e non vengono ancora collegati alla UI principale: l'integrazione avverrà solo dopo test e validazione dei contratti dati.
+Questa versione integra la console legacy con i moduli quantitativi, il workspace, i controlli di qualità e l'interfaccia responsive. L'integrazione resta incrementale: ogni provider deve rispettare contratti, quote e controlli di freschezza.
 
 ## Principi non negoziabili
 - Nessun numero inventato e nessun dato mancante convertito in zero.
@@ -16,18 +16,20 @@ Questa è la fondazione incrementale della versione 2.0. L'app legacy resta inal
 ## Architettura target
 1. Presentation: React, responsive mobile-first, web e Capacitor Android.
 2. Application: casi d'uso per ricerca titolo, analisi, portafoglio, eventi e report.
-3. Data adapters: SEC EDGAR, ECB SDMX, FRED, provider di prezzo selezionabili e dati manuali.
+3. Data adapters: Yahoo Finance non ufficiale per copertura multi-mercato; Alpha Vantage free-tier per storico daily/backtest; ECB SDMX e FRED per macro; SEC EDGAR adapter disponibile ma non attivato nella UI; dati manuali.
 4. Quality layer: validazione schema, freschezza, coerenza, copertura e provenienza.
 5. Quant engine: indicatori tecnici, fondamentali, DCF, comparables, rischio e backtest.
 6. AI layer: Gemini interpreta esclusivamente output strutturati e verificati.
 7. Storage: IndexedDB sul web e storage locale tramite adapter Capacitor su Android.
 
 ## Fonti e limiti
-- SEC EDGAR: fonte primaria per filing e dati XBRL USA, non per quotazioni. Rispettare User-Agent identificabile e rate limit SEC; accesso automatizzato e CORS vanno verificati nell'ambiente reale.
-- ECB Data Portal: statistiche ufficiali via SDMX; usare codici dataset/serie validati.
-- FRED: API con chiave; verificare licenza e attribuzione della singola serie sottostante prima di esporre o ridistribuire dati.
-- Alpha Vantage: fallback condizionato da quota gratuita, endpoint e termini correnti; non assumere realtime né copertura fondamentale gratuita.
-- Yahoo Finance: endpoint non ufficiali rimossi dal ruolo di fonte primaria. Eventuale uso futuro solo dopo verifica dei termini e di un accesso autorizzato.
+- Yahoo Finance: accesso senza chiave e senza costo API, ma endpoint non ufficiali, senza SLA e con termini/diritti d'uso da verificare. Usato come provider indicativo principale per la copertura globale; non dichiarare realtime.
+- Alpha Vantage: piano gratuito con quota pubblicata di 25 richieste al giorno; l'app applica cache giornaliera e contatore condiviso localmente tra backtest e fallback analisti. Dati daily; realtime e 15 minuti USA sono premium e non sono chiamati.
+- FRED: chiave API gratuita; dodici serie macro con frequenze e revisioni proprie. Nessuna funzione a pagamento viene chiamata.
+- ECB Data Portal: statistiche ufficiali pubbliche via SDMX, senza chiave.
+- SEC EDGAR: adapter XBRL gratuito presente ma non collegato alla schermata principale; richiede gestione CORS/User-Agent prima dell'attivazione.
+- Gemini: solo gemini-3.5-flash-lite, nessun modello selezionabile e nessun Search grounding. Richiede progetto Google AI Studio senza fatturazione collegata e resta soggetto alle quote gratuite.
+- Finnhub è stato rimosso dal flusso applicativo: il target price non è affidabilmente disponibile nel piano gratuito e non giustifica una chiave aggiuntiva.
 
 ## Motore quantitativo
 - CAGR richiede valori positivi e durata valida.
