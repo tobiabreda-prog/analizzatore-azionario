@@ -5,7 +5,6 @@ export function normalizeTrade(t) {
   const fees=finite(t.fees)?t.fees:0;
   const taxes=finite(t.taxes)?t.taxes:0;
   if(fees<0||taxes<0) throw new Error("Commissioni e imposte non possono essere negative");
-  if(t.side==="BUY"&&t.quantity*t.price<5000&&["EUR","USD"].includes(String(t.currency).toUpperCase())) throw new Error("Investimento minimo: 5.000 EUR o USD per acquisto");
   return {...t,symbol:String(t.symbol).toUpperCase(),currency:String(t.currency).toUpperCase(),fees,taxes};
 }
 export function buildPositions(trades=[]) {
