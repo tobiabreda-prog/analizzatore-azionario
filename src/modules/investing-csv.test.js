@@ -95,4 +95,18 @@ describe("import CSV Investing.com", () => {
     expect(parsed.trades.every(t => /^\d{4}-\d{2}-\d{2}$/.test(t.date))).toBe(true);
   });
 
+  it("riconosce il CSV Investing con intestazione completa, BOM e righe CRLF", () => {
+    const extendedHeader = '"","Nome","Simbolo","Borsa","Tipo","Quantità","Prezzo Medio","Prezzo Corrente","Orario esteso","Orario esteso (%)","Precedente","Valore di mercato","Commissione","Peso","P/L Giornaliero","%P/L giornaliero","% netta P/L","Prof./Perd. netto","Prossima Data Utili","Ultimo","Denaro","Lettera","Apertura","Precedente","Massimo","Minimo","Var.","Var. %","Vol.","Prossima Data Utili","Ora","Market Cap"';
+    const csv = "\\uFEFF" + SAMPLE.replace('"","Nome","Simbolo","Borsa","Tipo","Quantità","Prezzo Medio"', extendedHeader);
+    expect(isInvestingCsv(csv)).toBe(true);
+    const parsed = parseInvestingCsv(csv);
+    expect(parsed.summaryPositions).toBe(1);
+    expect(parsed.trades).toHaveLength(13);
+  });
+  it("non confonde un CSV Investing con un CSV generico che richiede date", () => {
+    const csv = SAMPLE.replace(/\\r\\n/g, "\\n");
+    expect(isInvestingCsv(csv)).toBe(true);
+    expect(parseInvestingCsv(csv).openLots).toBe(5);
+  });
+
 });
