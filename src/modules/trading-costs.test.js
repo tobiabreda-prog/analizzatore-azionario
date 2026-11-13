@@ -3,7 +3,8 @@ import {MIN_INVESTMENT_NOTIONAL,FINECO_DEFAULT_FEES,defaultFinecoFee,ITALIAN_FTT
 
 describe("Fineco trading cost defaults",()=>{
   it("uses 5,000 as minimum notional for EUR and USD investments",()=>{
-    expect(MIN_INVESTMENT_NOTIONAL).toBe(5000);\n    expect(formatItalianInteger(MIN_INVESTMENT_NOTIONAL)).toBe("5.000");
+    expect(MIN_INVESTMENT_NOTIONAL).toBe(5000);
+    expect(formatItalianInteger(MIN_INVESTMENT_NOTIONAL)).toBe("5.000");
   });
   it("uses non-frequent trading commissions supplied by the user",()=>{
     expect(FINECO_DEFAULT_FEES).toEqual({EUR:19,USD:12.95});
