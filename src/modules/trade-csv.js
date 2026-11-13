@@ -1,16 +1,16 @@
 import { normalizeTrade } from "./portfolio.js";
 const norm=(v)=>String(v??"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
-function splitLine(line,delimiter){
+export function splitLine(line,delimiter){
  const out=[];let field="",quoted=false;
  for(let i=0;i<line.length;i++){const ch=line[i];if(ch==='"'){if(quoted&&line[i+1]==='"'){field+='"';i++;}else quoted=!quoted;}else if(ch===delimiter&&!quoted){out.push(field);field="";}else field+=ch;}
  if(quoted)throw new Error("CSV non valido: virgolette non chiuse");out.push(field);return out;
 }
-function parseNumber(value,label){
+export function parseNumber(value,label){
  const raw=String(value??"").trim();if(!raw)throw new Error(label+" mancante");
  const normalized=raw.includes(",")?(raw.includes(".")?raw.replace(/\./g,"").replace(",","."):raw.replace(",",".")):raw;
  const n=Number(normalized);if(!Number.isFinite(n))throw new Error(label+" non numerico: "+raw);return n;
 }
-function isoDate(value){
+export function isoDate(value){
  const v=String(value??"").trim();if(/^\d{4}-\d{2}-\d{2}$/.test(v))return v;
  const m=v.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/);if(m)return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
  return v;
