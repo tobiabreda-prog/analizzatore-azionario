@@ -61,4 +61,12 @@ describe("investment readiness gate",()=>{
     expect(validIsoDate("2025-02-29")).toBe(false);
     expect(validIsoDate("2026-13-01")).toBe(false);
   });
+  it("blocks malformed history rows without throwing",()=>{
+    const input=fixture();
+    input.quote.history[12]=null;
+    const result=assessAnalysisReadiness({...input,now});
+    expect(result.ready).toBe(false);
+    expect(result.reasons.join(" ")).toMatch(/non valido o non cronologico/);
+  });
+
 });
