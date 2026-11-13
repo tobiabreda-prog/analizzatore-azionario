@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { ComposedChart, LineChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell } from "recharts";
-import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, diagnostics } from "./data.js";
+import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, loadCorporateEvents, diagnostics } from "./data.js";
 import { printReport } from "./report.js";
 import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key, Printer } from "lucide-react";
 
@@ -358,6 +358,11 @@ export default function AnalizzatoreAzionario() {
         if (acc.val.marketCap && !acc.quote.marketCap) acc.quote = { ...acc.quote, marketCap: acc.val.marketCap };
         setData({ ...acc });
       }
+      if (acc.events === undefined) {
+        setStep(2);
+        acc.events = await soft(() => loadCorporateEvents(sym), null, "Calendario utili e dividendi");
+        setData({ ...acc });
+      }
       if (!acc.an || acc.mkt === undefined) {
         setStep(2);
         const [an, mkt] = await Promise.all([
@@ -653,6 +658,44 @@ export default function AnalizzatoreAzionario() {
               </div>
             </Card>
           </>
+        )}
+
+
+        {data.events && (
+          <Card title="Earnings & Dividend Intelligence" meta={<Meta d={data.events.asOf} src={data.events.source} />}>
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <div className="font-semibold text-sm mb-2">Calendario risultati</div>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <Stat k="Prossima trimestrale" v={data.events.earnings?.nextDate || "n.d."} />
+                  <Stat k="Periodo stima" v={data.events.earnings?.estimatePeriod || "n.d."} />
+                  <Stat k="EPS atteso" v={nf(data.events.earnings?.epsEstimate)} />
+                  <Stat k="Ricavi attesi" v={cf(data.events.earnings?.revenueEstimate)} />
+                </div>
+                {(data.events.earnings?.history || []).length > 0 && (
+                  <div className="overflow-x-auto mt-2"><table className="w-full text-xs"><thead><tr className={th.mute}><th className="text-left p-1">Periodo</th><th className="text-right p-1">EPS effettivo</th><th className="text-right p-1">Stima</th><th className="text-right p-1">Sorpr. %</th></tr></thead><tbody>
+                    {data.events.earnings.history.slice().reverse().map((x,i) => <tr key={i} className={`border-t ${th.card}`}><td className="p-1">{x.quarter || "n.d."}</td><td className="text-right p-1">{nf(x.epsActual)}</td><td className="text-right p-1">{nf(x.epsEstimate)}</td><td className="text-right p-1">{pf(x.surprisePct)}</td></tr>)}
+                  </tbody></table></div>
+                )}
+              </div>
+              <div>
+                <div className="font-semibold text-sm mb-2">Dividendi</div>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <Stat k="Dividendo annuo / azione" v={data.events.dividends?.annualRate != null ? nf(data.events.dividends.annualRate) + " " + (q?.currency || "") : "n.d."} />
+                  <Stat k="Dividend yield" v={data.events.dividends?.yield != null ? nf(data.events.dividends.yield, 2) + "%" : "n.d."} />
+                  <Stat k="Payout ratio" v={data.events.dividends?.payoutRatio != null ? nf(data.events.dividends.payoutRatio, 1) + "%" : "n.d."} />
+                  <Stat k="Ex-dividend date" v={data.events.dividends?.exDividendDate || "n.d."} />
+                  <Stat k="Yield medio 5 anni" v={data.events.dividends?.fiveYearAvgYield != null ? nf(data.events.dividends.fiveYearAvgYield, 2) + "%" : "n.d."} />
+                </div>
+                {(data.events.dividends?.history || []).length > 0 && (
+                  <div className="overflow-x-auto mt-2"><table className="w-full text-xs"><thead><tr className={th.mute}><th className="text-left p-1">Data stacco</th><th className="text-right p-1">Importo / azione</th></tr></thead><tbody>
+                    {data.events.dividends.history.slice(-8).reverse().map((x,i) => <tr key={i} className={`border-t ${th.card}`}><td className="p-1">{x.date}</td><td className="text-right p-1">{nf(x.amount)} {q?.currency || ""}</td></tr>)}
+                  </tbody></table></div>
+                )}
+              </div>
+            </div>
+            <p className={`text-xs mt-3 ${th.mute}`}>Date, stime e dividendi dipendono dalla copertura Yahoo Finance e possono essere assenti o soggetti a revisione. Il dividend yield è indicativo, non garantito; la data di pagamento non è esposta da questa fonte in modo uniforme. I dati non modificano il punteggio.</p>
+          </Card>
         )}
 
         {v && (
