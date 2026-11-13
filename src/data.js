@@ -243,10 +243,11 @@ async function peerSymbols(symbol, fhKey) {
 }
 
 async function buildVal(s, symbol, fhKey) {
-  const own = {}, hist = {};
+  const own = {}, hist = {}, dates = {};
   let spans = [];
   Object.entries(VAL_TYPES).forEach(([k, t]) => {
     own[k] = round(lastVal(s, t), 2);
+    dates[k] = s[t]?.at(-1)?.d || null;
     const h = histMedian(s[t]);
     if (h) { hist[k] = round(h.v, 2); spans.push(h.span); }
   });
@@ -261,7 +262,7 @@ async function buildVal(s, symbol, fhKey) {
       Object.entries(VAL_TYPES).forEach(([k, t]) => { sector[k] = round(median(vals.map((p) => lastVal(p.s, t))), 2); });
     }
   } catch (e) { /* peer non disponibili */ }
-  const metrics = Object.keys(VAL_TYPES).filter((k) => own[k] != null).map((k) => ({ k, v: own[k], sector: sector[k] ?? null, hist5y: hist[k] ?? null }));
+  const metrics = Object.keys(VAL_TYPES).filter((k) => own[k] != null).map((k) => ({ k, v: own[k], sector: sector[k] ?? null, hist5y: hist[k] ?? null, date: dates[k] }));
   return {
     metrics, peers, marketCap: lastVal(s, "trailingMarketCap"),
     histYears: spans.length ? round(Math.min(...spans), 1) : null,
