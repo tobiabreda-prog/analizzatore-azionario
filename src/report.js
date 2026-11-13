@@ -77,6 +77,13 @@ export function buildReportHtml({ data, tech, S, label, warns = [] }) {
     ? `<h3>Consenso degli analisti${a.source && a.source !== "n.d." ? ` <span class="mute">(${esc(a.source)})</span>` : ""}</h3>${table(["Voce", "Valore"], arows)}`
     : `<p class="mute">Consenso degli analisti (target price e rating) non disponibile per questo titolo: le fonti gratuite lo coprono solo per i titoli USA.</p>`;
 
+  const ev = data.events || {};
+  const earn = ev.earnings || {}, div = ev.dividends || {};
+  const earnRows = [["Prossima pubblicazione risultati", earn.nextDate || "n.d."], ["Periodo stima", earn.estimatePeriod || "n.d."], ["EPS atteso", nf(earn.epsEstimate)], ["Ricavi attesi (mln)", mf(earn.revenueEstimate)]];
+  const earnHistory = table(["Periodo", "EPS effettivo", "EPS stimato", "Sorpr. %"], (earn.history || []).slice().reverse().map((x) => [x.quarter || "n.d.", nf(x.epsActual), nf(x.epsEstimate), pf(x.surprisePct)]));
+  const divRows = [["Dividendo annuo per azione", isNum(div.annualRate) ? nf(div.annualRate) + " " + (q.currency || "") : "n.d."], ["Dividend yield", isNum(div.yield) ? nf(div.yield, 2) + "%" : "n.d."], ["Payout ratio", isNum(div.payoutRatio) ? nf(div.payoutRatio, 1) + "%" : "n.d."], ["Data ex-dividendo", div.exDividendDate || "n.d."], ["Yield medio 5 anni", isNum(div.fiveYearAvgYield) ? nf(div.fiveYearAvgYield, 2) + "%" : "n.d."]];
+  const divHistory = table(["Data stacco", "Importo per azione"], (div.history || []).slice(-8).reverse().map((x) => [x.date, nf(x.amount) + " " + (q.currency || "")]));
+  const eventsHtml = ev && (ev.earnings || ev.dividends) ? '<section><h2>Calendario utili e dividendi</h2><div class="two"><div><h3>Earnings Intelligence</h3>' + table(["Indicatore", "Valore"], earnRows) + earnHistory + '</div><div><h3>Dividend Intelligence</h3>' + table(["Indicatore", "Valore"], divRows) + divHistory + '</div></div><p class="mute">Fonte: ' + esc(ev.source || "n.d.") + ', dati al ' + esc(ev.asOf || "n.d.") + '. Copertura e stime possono variare. Dividend yield non garantito. La data di pagamento non è esposta in modo uniforme. Questi dati non modificano il punteggio.</p></section>' : "";
   const mk = data.mkt;
   const rsRows = mk && mk.stock ? [["3 mesi", "r13"], ["6 mesi", "r26"], ["12 mesi", "r52"]].filter(([, k]) => isNum(mk.stock[k])).map(([lab, k]) => {
     const ix = mk.index && isNum(mk.index[k]) ? mk.index[k] : null;
@@ -122,7 +129,7 @@ ul { margin: 2px 0 0; padding-left: 16px; } li { margin: 1px 0; }
 <section><h2>Punteggi</h2><table><tbody>${scoreRows}</tbody></table></section>
 <section><h2>Prezzo e analisi tecnica</h2>${priceChartSvg(tech)}${table(["Indicatore", "Valore"], tr)}</section>
 <section><h2>Bilanci</h2>${annual}${quarters ? `<div style="height:6px"></div>${quarters}` : ""}<div style="height:6px"></div>${table(["Solidità finanziaria", "Valore"], balance)}</section>
-<section><h2>Valutazione</h2>${val || '<p class="mute">Multipli non disponibili.</p>'}</section>
+<section><h2>Valutazione</h2>${val || '<p class="mute">Multipli non disponibili.</p>'}</section>${eventsHtml}
 <section><h2>Sentiment di mercato</h2>${analysts}${strength}</section>
 <section><h2>Notizie recenti</h2>${n.officialSentiment ? `<p><b>Tono complessivo:</b> ${esc(n.officialSentiment)}</p>` : ""}${news ? `<ul>${news}</ul>` : '<p class="mute">Nessuna notizia disponibile.</p>'}${n.risks && n.risks.length ? `<p class="mute">Rischi segnalati dalle notizie: ${esc(n.risks.join(" · "))}</p>` : ""}</section>
 <section><h2>Giudizio</h2>${verdict}</section>
