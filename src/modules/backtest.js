@@ -1,4 +1,4 @@
-import { MIN_INVESTMENT_NOTIONAL } from "./trading-costs.js";
+import { MIN_INVESTMENT_NOTIONAL, formatItalianInteger } from "./trading-costs.js";
 import { maxDrawdown, annualizedVolatility } from "./technical-indicators.js";
 const finite=(v)=>typeof v==="number"&&Number.isFinite(v);
 const validDate=(v)=>typeof v==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(new Date(v+"T00:00:00Z").getTime())&&new Date(v+"T00:00:00Z").toISOString().slice(0,10)===v;
@@ -18,7 +18,7 @@ export function runLongOnlyBacktest({bars,signals,initialCapital=10000,feeBps=0,
       const px=bar.close*(nextPosition?1+slippageBps/10000:1-slippageBps/10000);
       if(nextPosition){
         if(cash<=fixedFee)throw new Error("Capitale insufficiente per la commissione fissa di acquisto");
-        const spend=(cash-fixedFee)/(1+(feeBps+buyTaxBps)/10000);if(spend<minNotional)throw new Error("Controvalore dell'acquisto inferiore al minimo di "+minNotional.toLocaleString("it-IT")+" nella valuta del titolo: aumenta il capitale iniziale o riduci i costi.");shares=spend/px;cash=0;
+        const spend=(cash-fixedFee)/(1+(feeBps+buyTaxBps)/10000);if(spend<minNotional)throw new Error("Controvalore dell'acquisto inferiore al minimo di "+formatItalianInteger(minNotional)+" nella valuta del titolo: aumenta il capitale iniziale o riduci i costi.");shares=spend/px;cash=0;
         trades.push({date:bar.date,side:"BUY",price:px,grossNotional:spend,commission:fixedFee+spend*feeBps/10000,transactionTax:spend*buyTaxBps/10000});
       } else {
         const gross=shares*px,net=gross*(1-feeBps/10000)-fixedFee;
