@@ -147,8 +147,10 @@ export default function FairValuePanel({dark=false,analysisData=null}){
      <p className="text-xs">Crescita FCF ipotizzata: {autoStatus.result.assumptions.modelGrowth.toFixed(2)}% · WACC documentato: {autoStatus.result.assumptions.wacc.toFixed(2)}% · g terminale ipotizzata: {autoStatus.result.assumptions.terminalGrowth.toFixed(2)}%.</p>
      <p className="text-xs">Fonte bilanci: {autoStatus.result.assumptions.source}. {autoStatus.result.warning}</p>
    </div>}
-   <details className="rounded-lg border p-3">
+   </div>
+  <details className="rounded-lg border p-3">
     <summary className="cursor-pointer text-sm font-semibold">Simulatore DCF manuale (solo analisi di sensibilità)</summary>
+    <div className="space-y-2">
 
    <p className={`text-xs ${muted}`}>Compilazione automatica dai bilanci caricati. FCF base: mediana dei FCF positivi degli ultimi 3 esercizi (almeno due valori positivi); crescita: CAGR storico con almeno 3 osservazioni, limitato tra −5% e +12%, altrimenti 5%. WACC non precompilato: deve essere stimato con parametri verificati (anche senza Gemini). Crescita terminale 2,5% è un’ipotesi standard modificabile, non un dato di mercato.</p>
    <p className={`text-xs ${muted}`}>Ultimo esercizio: {latestFcfYear??"n.d."} · Fonte: {analysisData?.fin?.source||"non specificata"} · Debito netto: {Number.isFinite(debt)?"disponibile":"mancante"}.</p>
