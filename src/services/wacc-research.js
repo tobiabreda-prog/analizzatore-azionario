@@ -54,13 +54,13 @@ export async function researchWacc({symbol,currency,signal}={}){
   throw new Error("Impossibile verificare i modelli Gemini (HTTP "+listResponse.status+"): "+String(detail.error?.message||"controlla chiave e accesso API").slice(0,220));
  }
  const available=(await listResponse.json()).models||[];
- const candidates=available.filter(m=>(m.supportedGenerationMethods||[]).includes("generateContent")&&/gemini.*flash/i.test(m.name||"")&&!/lite|preview|exp/i.test(m.name||""));
- const preferred=["gemini-2.5-flash","gemini-2.0-flash"];
+ const candidates=available.filter(m=>(m.supportedGenerationMethods||[]).includes("generateContent")&&/gemini.*flash/i.test(m.name||"")&&!/preview|exp/i.test(m.name||""));
+ const preferred=["gemini-3.5-flash-lite","gemini-2.5-flash-lite","gemini-2.5-flash","gemini-2.0-flash-lite","gemini-2.0-flash"];
  candidates.sort((a,b)=>{
   const rank=m=>{const n=String(m.name).split("/").pop();const i=preferred.indexOf(n);return i<0?preferred.length:i;};
   return rank(a)-rank(b);
  });
- if(!candidates.length)throw new Error("La tua chiave non espone modelli Gemini Flash compatibili con generateContent.");
+ if(!candidates.length)throw new Error("La tua chiave non espone modelli Gemini Flash/Lite compatibili con generateContent.");
  let response=null, lastError="";
  for(const model of candidates.slice(0,4)){
   response=await fetch("https://generativelanguage.googleapis.com/v1beta/"+model.name+":generateContent",{
