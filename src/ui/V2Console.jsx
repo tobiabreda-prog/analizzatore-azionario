@@ -28,6 +28,7 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
  const [input,setInput] = useState("");
  const [tab,setTab] = useState(initialTab);
  const [loaded,setLoaded] = useState(false);
+ useEffect(()=>setTab(initialTab),[initialTab]);
  const [error,setError] = useState("");
  const [notice,setNotice] = useState("");
  const current = cleanSymbol(analysisData?.quote?.ticker || analysisData?.quote?.symbol);
