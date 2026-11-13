@@ -1,5 +1,5 @@
 const BASE="https://www.alphavantage.co/query";
-const usageKey=(date=new Date())=>"aa2_av_usage_"+date.toISOString().slice(0,10);
+const usageKey=(date=new Date())=>"av_count_"+date.toISOString().slice(0,10);
 function resolveStorage(storage){try{return storage??globalThis.localStorage??null;}catch{return null;}}
 export function getAlphaVantageUsage(storage,date=new Date()){
   try{const store=resolveStorage(storage);const n=Number(store?.getItem(usageKey(date))??0);return Number.isFinite(n)&&n>=0?n:0;}catch{return 0;}
