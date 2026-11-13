@@ -410,7 +410,8 @@ export default function AnalizzatoreAzionario() {
   async function doPrint() {
     if (!S || !q) return;
     try {
-      await printReport({ data, tech, S, label: labelOf(S.overall), warns });
+      const reportData = S.readiness?.ready ? data : { ...data, final: { failed: true } };
+      await printReport({ data: reportData, tech, S, label: labelOf(S.overall), warns });
     } catch (e) {
       const m = String(e.message || e);
       setWarns((x) => [...x, /not implemented|UNIMPLEMENTED/i.test(m) ? "Stampa non disponibile in questa versione dell'app: installa l'ultimo APK." : "Stampa non riuscita: " + m.slice(0, 120)]);
