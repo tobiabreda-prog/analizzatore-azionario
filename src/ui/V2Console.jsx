@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Plus, Wallet, CalendarDays, ShieldCheck, AlertTriangle, Trash2, Download, Upload, LineChart, RefreshCw } from "lucide-react";
 import { loadAlphaVantageDaily, getAlphaVantageUsage } from "../providers/alphavantage.js";
+import { getApiKey, saveApiKey } from "../services/api-settings.js";
 import { loadFredObservations } from "../providers/fred.js";
 import { loadEcbSeries } from "../providers/ecb.js";
 import { classifyMacroRegime } from "../core/macro-regime.js";
@@ -42,7 +43,7 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null,an
  const [eventTicker,setEventTicker]=useState("");
  const [loaded,setLoaded]=useState(false);
  const [marketTicker,setMarketTicker]=useState("AAPL");
- const [marketApiKey,setMarketApiKey]=useState("");
+ const [marketApiKey,setMarketApiKey]=useState(()=>getApiKey("alphavantage"));
  const [marketRows,setMarketRows]=useState([]);
  const [marketHistory,setMarketHistory]=useState([]);
  const [backtestResult,setBacktestResult]=useState(null);
@@ -57,7 +58,7 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null,an
  const [marketError,setMarketError]=useState("");
  const [marketLoading,setMarketLoading]=useState(false);
  const [marketUsage,setMarketUsage]=useState(()=>getAlphaVantageUsage());
- const [fredApiKey,setFredApiKey]=useState("");
+ const [fredApiKey,setFredApiKey]=useState(()=>getApiKey("fred"));
  const [macroRows,setMacroRows]=useState([]);
  const [macroError,setMacroError]=useState("");
  const [macroLoading,setMacroLoading]=useState(false);
@@ -122,8 +123,8 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null,an
    <p className={`text-xs ${muted}`}>Limiti essenziali: strategia SMA 20/50 semplificata; nessun benchmark, dividendo, split, FX, imposte, costi specifici dell’intermediario o titoli delistati. Dati non point-in-time: restano possibili survivorship bias e differenze di qualità del feed. Non usare il risultato come previsione o prova di rendimento futuro.</p>
   </section>}
   {tab==="market"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}><div><h2 className="text-lg font-semibold">Prezzi storici giornalieri</h2><p className={`text-xs ${muted}`}>Provider Alpha Vantage · dati daily, non realtime. Il piano gratuito ha limiti di chiamata e copertura; il risultato dipende dal mercato e dal ticker supportato.</p></div>
-   <form onSubmit={loadMarketHistory} className="grid grid-cols-1 sm:grid-cols-3 gap-3"><label className="text-xs space-y-1">Ticker<input required value={marketTicker} onChange={e=>setMarketTicker(e.target.value.toUpperCase())} className="w-full rounded-lg border p-2 bg-transparent text-sm" placeholder="AAPL"/></label><label className="text-xs space-y-1 sm:col-span-2">Chiave API Alpha Vantage<input required type="password" autoComplete="off" value={marketApiKey} onChange={e=>setMarketApiKey(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm" placeholder="Inserisci la tua chiave API"/></label><button disabled={marketLoading} className="rounded-lg bg-emerald-600 text-white p-2 flex items-center justify-center gap-2 text-sm disabled:opacity-50"><RefreshCw size={16}/>{marketLoading?"Caricamento…":"Aggiorna storico"}</button></form>
-   <p className={`text-xs ${muted}`}>Richieste registrate oggi su questo browser: {marketUsage} / 25. La chiave resta nella memoria della schermata e non viene salvata nel workspace. Per sicurezza non usare questa modalità in una distribuzione pubblica multiutente.</p>
+   <form onSubmit={loadMarketHistory} className="grid grid-cols-1 sm:grid-cols-3 gap-3"><label className="text-xs space-y-1">Ticker<input required value={marketTicker} onChange={e=>setMarketTicker(e.target.value.toUpperCase())} className="w-full rounded-lg border p-2 bg-transparent text-sm" placeholder="AAPL"/></label><label className="text-xs space-y-1 sm:col-span-2">Chiave API Alpha Vantage<input required type="password" autoComplete="off" value={marketApiKey} onChange={e=>{setMarketApiKey(e.target.value);saveApiKey("alphavantage",e.target.value);}} className="w-full rounded-lg border p-2 bg-transparent text-sm" placeholder="Inserisci la tua chiave API"/></label><button disabled={marketLoading} className="rounded-lg bg-emerald-600 text-white p-2 flex items-center justify-center gap-2 text-sm disabled:opacity-50"><RefreshCw size={16}/>{marketLoading?"Caricamento…":"Aggiorna storico"}</button></form>
+   <p className={`text-xs ${muted}`}>Richieste registrate oggi su questo browser: {marketUsage} / 25. La chiave viene salvata nelle impostazioni API condivise con la schermata principale, su questo dispositivo. Non usare questa modalità in una distribuzione pubblica multiutente.</p>
    {marketError&&<p className="text-sm text-red-500">{marketError}</p>}
    {marketIndicators&&<div className="grid grid-cols-2 sm:grid-cols-4 gap-2">{[["SMA 20",marketIndicators.sma20],["SMA 50",marketIndicators.sma50],["EMA 20",marketIndicators.ema20],["RSI 14",marketIndicators.rsi14]].map(([label,value])=><div key={label} className="rounded-lg border border-slate-500/20 p-3"><div className={`text-xs ${muted}`}>{label}</div><div className="text-lg font-semibold">{value==null?"n.d.":value.toFixed(2)}</div></div>)}</div>}
    {marketIndicators&&<p className={`text-xs ${muted}`}>Indicatori calcolati localmente su {marketIndicators.observations} chiusure giornaliere, ultimo dato {marketIndicators.asOf}. Sono descrittivi, non segnali automatici.</p>}
@@ -148,8 +149,8 @@ export default function V2Console({dark=false,onBack=()=>{},analysisData=null,an
    {!positions.rows.length&&<p className={`text-sm ${muted}`}>Nessun movimento registrato.</p>}
   </section>}
   {tab==="macro"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}><div><h2 className="text-lg font-semibold">Indicatori macro globali</h2><p className={`text-xs ${muted}`}>Serie ufficiali FRED ed ECB Data Portal. Le frequenze e i ritardi di pubblicazione variano per indicatore; non sono quotazioni intraday.</p></div>
-   <form onSubmit={loadMacro} className="grid sm:grid-cols-3 gap-3"><label className="text-xs space-y-1 sm:col-span-2">Chiave API gratuita FRED (necessaria solo per le serie FRED)<input type="password" autoComplete="off" value={fredApiKey} onChange={e=>setFredApiKey(e.target.value)} className="w-full rounded-lg border p-2 bg-transparent text-sm" placeholder="Inserisci la tua chiave FRED"/></label><button disabled={macroLoading} className="rounded-lg bg-emerald-600 text-white p-2 flex items-center justify-center gap-2 text-sm disabled:opacity-50"><RefreshCw size={16}/>{macroLoading?"Caricamento…":"Aggiorna indicatori"}</button></form>
-   <p className={`text-xs ${muted}`}>Dodici richieste FRED per aggiornamento (serve la tua chiave gratuita); il cambio EUR/USD proviene da ECB Data Portal senza chiave. Le frequenze e i ritardi variano per serie. La chiave FRED non viene salvata nel workspace. Non usare questa modalità per una distribuzione pubblica multiutente.</p>
+   <form onSubmit={loadMacro} className="grid sm:grid-cols-3 gap-3"><label className="text-xs space-y-1 sm:col-span-2">Chiave API gratuita FRED (necessaria solo per le serie FRED)<input type="password" autoComplete="off" value={fredApiKey} onChange={e=>{setFredApiKey(e.target.value);saveApiKey("fred",e.target.value);}} className="w-full rounded-lg border p-2 bg-transparent text-sm" placeholder="Inserisci la tua chiave FRED"/></label><button disabled={macroLoading} className="rounded-lg bg-emerald-600 text-white p-2 flex items-center justify-center gap-2 text-sm disabled:opacity-50"><RefreshCw size={16}/>{macroLoading?"Caricamento…":"Aggiorna indicatori"}</button></form>
+   <p className={`text-xs ${muted}`}>Dodici richieste FRED per aggiornamento (serve la tua chiave gratuita); il cambio EUR/USD proviene da ECB Data Portal senza chiave. Le frequenze e i ritardi variano per serie. La chiave FRED viene salvata nelle impostazioni API condivise con la schermata principale, su questo dispositivo. Non usare questa modalità per una distribuzione pubblica multiutente.</p>
    {macroError&&<p className="text-sm text-red-500">{macroError}</p>}
    <div className="grid sm:grid-cols-2 gap-3">{macroRows.map(r=><div key={r.id} className="rounded-lg border border-slate-500/20 p-3"><div className="text-xs font-semibold">{r.label} <span className={muted}>({r.id})</span></div><div className="text-xl font-semibold mt-1">{r.status==="ok"?r.value.toLocaleString("it-IT",{maximumFractionDigits:3})+" "+r.unit:"n.d."}</div><div className={`text-xs ${muted}`}>{r.status==="ok"?"Osservazione: "+r.date:r.error||"Nessuna osservazione"}</div></div>)}</div>
    <div className="rounded-lg border border-slate-500/20 p-3 space-y-2"><div className="font-semibold text-sm">Regime di rischio USA (descrittivo)</div><div className="text-sm font-bold">{macroRegime.status==="insufficient_data"?"Dati insufficienti":macroRegime.regime==="risk_off"?"Risk-off":macroRegime.regime==="cautious"?"Cauto":macroRegime.regime==="risk_on"?"Risk-on":"Non classificato"}</div><div className={`text-xs ${muted}`}>{macroRegime.available}/{macroRegime.required} indicatori core aggiornati</div>{macroRegime.drivers.map((d,i)=><div key={i} className={`text-xs ${muted}`}>• {d}</div>)}</div>

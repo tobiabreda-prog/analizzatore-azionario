@@ -4,6 +4,7 @@ import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, loa
 import { printReport } from "./report.js";
 import { assessAnalysisReadiness } from "./core/analysis-gate.js";
 import V2Console from "./ui/V2Console.jsx";
+import { getApiKey, saveApiKey } from "./services/api-settings.js";
 import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key, Printer } from "lucide-react";
 
 const POPULAR_TICKERS = [
@@ -32,7 +33,7 @@ function parseJSON(txt) {
 
 async function callGeminiAPI(systemInstruction, userPrompt) {
   let apiKey = "";
-  try { apiKey = localStorage.getItem("gemini_api_key") || ""; } catch (e) {}
+  apiKey = getApiKey("gemini");
   if (!apiKey) throw new Error("Chiave API Gemini mancante: inseriscila con l'icona della chiave in alto.");
   const model = "gemini-3.5-flash-lite";
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
@@ -291,7 +292,7 @@ export default function AnalizzatoreAzionario() {
   const [showKey, setShowKey] = useState(false);
   const [warns, setWarns] = useState([]);
   const [cachedAt, setCachedAt] = useState(null);
-  const [avVal, setAvVal] = useState(() => { try { return localStorage.getItem("av_key") || ""; } catch (e) { return ""; } });
+  const [avVal, setAvVal] = useState(() => getApiKey("alphavantage"));
   const [diag, setDiag] = useState(null);
   const [diagBusy, setDiagBusy] = useState(false);
   const runDiag = async () => { setDiagBusy(true); setDiag(null); try { setDiag(await diagnostics("", avVal.trim())); } catch (e) { setDiag([{ name: "Diagnostica", ok: false, detail: e.message }]); } finally { setDiagBusy(false); } };
@@ -312,7 +313,7 @@ export default function AnalizzatoreAzionario() {
     } catch (e) { setTestMsg("Test non riuscito: " + e.message); }
     finally { setTesting(false); }
   };
-  const [keyVal, setKeyVal] = useState(() => { try { return localStorage.getItem("gemini_api_key") || ""; } catch (e) { return ""; } });
+  const [keyVal, setKeyVal] = useState(() => getApiKey("gemini"));
   const busy = step >= 0 && step < STEPS.length;
   const th = dark ? { bg: "bg-slate-950 text-slate-100", card: "bg-slate-900 border-slate-800", mute: "text-slate-400", inp: "bg-slate-900 border-slate-700 text-slate-100 placeholder:text-slate-400", grid: "#3f4d63", txt: "#cbd5e1", dropdown: "bg-slate-900 border-slate-700 hover:bg-slate-800" } : { bg: "bg-slate-50 text-slate-900", card: "bg-white border-slate-200", mute: "text-slate-600", inp: "bg-white border-slate-300 text-slate-900 placeholder:text-slate-500", grid: "#d5dde8", txt: "#475569", dropdown: "bg-white border-slate-200 hover:bg-slate-100" };
   const C = dark
@@ -489,7 +490,7 @@ export default function AnalizzatoreAzionario() {
           </div>
           <div className="app-actions">
             <button onClick={() => setShowV2(true)} className="app-action-button app-workspace-button" aria-label="Apri workspace 2.0"><TrendingUp size={16} /><span>Workspace 2.0</span></button>
-            <button onClick={() => setShowKey(!showKey)} className="app-action-button" aria-label="Impostazioni fonti dati"><Key size={16} /></button>
+            <button onClick={() => { if (!showKey) { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); } setShowKey(!showKey); }} className="app-action-button" aria-label="Impostazioni fonti dati"><Key size={16} /></button>
             <button onClick={() => { const nd = !dark; setDark(nd); setThemeFixed(true); try { localStorage.setItem("theme", nd ? "dark" : "light"); } catch (e) {} }} className="app-action-button" aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
           </div>
         </header>
@@ -519,7 +520,7 @@ export default function AnalizzatoreAzionario() {
             <div className={`text-xs ${th.mute}`}>Piano gratuito: 25 richieste al giorno. L’app usa Alpha Vantage solo come integrazione facoltativa; le serie sono giornaliere, non realtime.</div>
             <div className="flex gap-2">
               <button disabled={testing} onClick={testKey} className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>Testa chiave</button>
-              <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); localStorage.removeItem("gemini_model"); localStorage.removeItem("finnhub_key"); localStorage.setItem("av_key", avVal.trim()); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium">Salva</button>
+              <button onClick={() => { saveApiKey("gemini", keyVal.trim()); saveApiKey("alphavantage", avVal.trim()); try { localStorage.removeItem("gemini_model"); localStorage.removeItem("finnhub_key"); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium">Salva</button>
             </div>
             <button disabled={diagBusy} onClick={runDiag} className={`w-full px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>{diagBusy ? "Test dati in corso…" : "Testa fonti dati"}</button>
             {diag && (
