@@ -18,3 +18,12 @@ export const ITALIAN_FTT_BPS_2026 = Object.freeze({
   REGULATED: 20,
   OTC: 40
 });
+
+export function minimumCapitalForOrder({minNotional=MIN_INVESTMENT_NOTIONAL,fixedFee=0,feeBps=0,buyTaxBps=0}={}) {
+  for (const value of [minNotional,fixedFee,feeBps,buyTaxBps]) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      throw new Error("Parametri di costo non validi");
+    }
+  }
+  return minNotional * (1 + (feeBps + buyTaxBps) / 10000) + fixedFee;
+}
