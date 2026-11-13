@@ -18,6 +18,8 @@ describe("Fineco transaction costs",()=>{
     expect(result.trades[0].transactionTax).toBeGreaterThan(0);
     expect(result.trades[1].commission).toBe(12.95);
     expect(result.trades[1].transactionTax).toBe(0);
+    expect(result.totalCommission).toBe(25.9);
+    expect(result.totalTransactionTax).toBeGreaterThan(0);
   });
   it("rejects a buy below the 5,000 minimum notional",()=>{
     expect(()=>runLongOnlyBacktest({
