@@ -6,7 +6,7 @@ const evidence=Object.fromEntries(["riskFree","beta","equityRiskPremium","costOf
  value:{riskFree:5.10,beta:1.09,equityRiskPremium:4.41,costOfDebt:4.50,taxRate:17,equityWeight:0.98}[k],
  url:({riskFree:"https://fred.stlouisfed.org/series/DGS10",beta:"https://www.investing.com/equities/apple-computer-inc",equityRiskPremium:"https://pages.stern.nyu.edu/~adamodar/pc/datasets/ctryprem.xlsx",costOfDebt:source,taxRate:source,equityWeight:source})[k],date:"2026-11-12"
 }]));
-const research={currency:"USD",wacc:9.8,inputs:evidence};
+const research={currency:"USD",wacc:9.783,inputs:evidence};
 const quote={ticker:"AAPL",price:250,currency:"USD",asOf:"2026-11-12"};
 const annual=[
  {y:2024,operatingCashFlow:118254,capitalExpenditure:-9447,interestExpense:1500,effectiveTaxRate:.241},
@@ -37,7 +37,7 @@ describe("one-click DCF feasibility (fail closed)",()=>{
   expect(r.valuation.scenarios).toHaveLength(3);
   expect(r.valuation.weightedFairValue).toBeGreaterThan(0);
   expect(r.assumptions.yearlyFcff[2]).toBeGreaterThan(136056);
-  expect(r.assumptions.wacc).toBe(9.8);
+  expect(r.assumptions.wacc).toBe(9.783);
  });
  it("rejects stale share count and a missing net-debt bridge",()=>{
   const r=calculateAutomaticDcf({...base,fin:{...base.fin,balance:{dilutedShares:14720.306}}},research,{now:NOW});
