@@ -1,10 +1,11 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { ComposedChart, LineChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell } from "recharts";
-import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, loadCorporateEvents, diagnostics } from "./data.js";
+import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, loadCorporateEvents, loadPeerValuation, diagnostics } from "./data.js";
 import { printReport } from "./report.js";
 import { assessAnalysisReadiness } from "./core/analysis-gate.js";
 import V2Console from "./ui/V2Console.jsx";
 import { getApiKey, saveApiKey } from "./services/api-settings.js";
+import { readAnalysisSection, readAnalysisSnapshot, writeAnalysisSection, analysisFingerprint } from "./services/analysis-cache.js";
 import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key, Printer } from "lucide-react";
 
 const POPULAR_TICKERS = [
@@ -133,7 +134,7 @@ function rsi(a, n = 14) {
   return out;
 }
 
-const STEPS = ["Quotazioni e storico…", "Bilanci e multipli…", "Analisti e confronto con l'indice…", "Notizie e giudizio…"];
+const STEPS = ["Quotazioni e storico…", "Bilanci e multipli…"];
 const WEIGHTS = { "Trend tecnico": 0.2, Crescita: 0.2, Redditività: 0.15, "Solidità finanziaria": 0.15, Valutazione: 0.15, Sentiment: 0.15 };
 
 export function buildTech(q) {
@@ -244,20 +245,7 @@ function mergeNews(acc, nw) {
   };
 }
 
-// ---------- Memoria locale: stesso titolo entro 30 minuti = nessuna nuova richiesta ----------
-const CACHE_KEY = "an_cache_v3", CACHE_TTL = 30 * 60 * 1000;
-const cKey = (t) => t.trim().toUpperCase();
-function cacheRead() { try { return JSON.parse(localStorage.getItem(CACHE_KEY)) || {}; } catch (e) { return {}; } }
-function cacheGet(t) { const e = cacheRead()[cKey(t)]; return e && Date.now() - e.ts < CACHE_TTL ? e : null; }
-function cachePut(keys, data, warns) {
-  try {
-    const all = cacheRead(), ts = Date.now();
-    keys.forEach((k) => { all[cKey(k)] = { ts, data, warns }; });
-    const fresh = Object.entries(all).filter(([, e]) => ts - e.ts < CACHE_TTL).sort((x, y) => y[1].ts - x[1].ts).slice(0, 10);
-    localStorage.setItem(CACHE_KEY, JSON.stringify(Object.fromEntries(fresh)));
-  } catch (e) { /* memoria piena o non disponibile */ }
-}
-
+// Independent report cache lives in services/analysis-cache.js.
 export default function AnalizzatoreAzionario() {
   const [dark, setDark] = useState(() => {
     try { const t = localStorage.getItem("theme"); if (t === "dark" || t === "light") return t === "dark"; } catch (e) {}
@@ -282,6 +270,9 @@ export default function AnalizzatoreAzionario() {
     m.content = bg;
   }, [dark]);
   const [showV2, setShowV2] = useState(false);
+  const [workspaceTab, setWorkspaceTab] = useState("watchlist");
+  const [aiBusy, setAiBusy] = useState(false);
+  const requestId = useRef(0);
   const [input, setInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [cur, setCur] = useState("");
@@ -329,78 +320,136 @@ export default function AnalizzatoreAzionario() {
     return POPULAR_TICKERS.filter(item => item.ticker.toLowerCase().includes(q) || item.name.toLowerCase().includes(q)).slice(0, 5);
   }, [input]);
 
-  async function run(t, resume, force) {
-    const target = (t ?? input).trim(); if (!target || busy) return;
-    setShowSuggestions(false);
-    setCur(target); setErr(null);
-    setHist((h) => [target, ...h.filter((x) => x.toLowerCase() !== target.toLowerCase())].slice(0, 8));
-    if (!resume && !force) {
-      const hit = cacheGet(target);
-      if (hit) { setData(hit.data); setWarns(hit.warns || []); setCachedAt(hit.ts); setStep(STEPS.length); return; }
-    }
-    setCachedAt(null); setStep(0);
-    if (!resume) setData({});
-    const acc = resume ? { ...data } : {};
-    const w = [];
-    setWarns([]);
-    const avKey = getApiKey("alphavantage").trim();
-    const soft = async (fn, empty, label) => {
-      try { return await fn(); } catch (e) { w.push(`${label}: dati non disponibili (${e.message.slice(0, 80)})`); setWarns([...w]); return empty; }
+
+  async function run(t, resume=false, force=false) {
+    const target=(t??input).trim().toUpperCase();
+    if(!target)return;
+    // Stale requests may finish but must never overwrite another ticker.
+    const id=++requestId.current,active=()=>id===requestId.current;
+    setShowSuggestions(false);setInput(target);setCur(target);setErr(null);setAiBusy(false);
+    setHist(h=>[target,...h.filter(x=>x.toUpperCase()!==target)].slice(0,8));
+    const snapshot=readAnalysisSnapshot(target);
+    const acc={...snapshot.data};
+    const notices=new Map(snapshot.stale.map(k=>[k,"Dati "+k+" da cache non aggiornata: verificare la data originale."]));
+    const updateNotices=()=>{if(active())setWarns([...notices.values()]);};
+    const clearNotice=k=>{notices.delete(k);updateNotices();};
+    const warn=(k,msg)=>{notices.set(k,msg);updateNotices();};
+    const publish=()=>{if(active())setData({...acc});};
+    const put=(key,value,cacheSymbol=target)=>{
+      if(!active()||value===undefined||value===null)return;
+      acc[key]=value;
+      writeAnalysisSection(cacheSymbol,key,value);
+      clearNotice(key);publish();
+    };
+    setData({...acc});updateNotices();
+    setCachedAt(!force&&snapshot.fresh.includes("quote")&&snapshot.fresh.includes("fin")?(snapshot.timestamps.quote||null):null);
+    setStep(acc.quote&&acc.fin&&acc.val?STEPS.length:0);
+    const section=async(key,fetcher)=>{
+      const cached=!force?readAnalysisSection(target,key):null;
+      if(cached){acc[key]=cached.value;clearNotice(key);publish();return cached.value;}
+      try {
+        const value=await fetcher();
+        if(!active())return null;
+        if(value!==null&&value!==undefined)put(key,value);
+        return value;
+      } catch(e) {
+        if(!active())return null;
+        const old=readAnalysisSection(target,key,{allowStale:true});
+        if(old)acc[key]=old.value;else delete acc[key];
+        warn(key,key+": "+(old?"uso ultima copia salvata, ":"dati non disponibili, ")+String(e.message||e).slice(0,100));
+        publish();
+        return old?.value??null;
+      }
     };
     try {
-      if (!acc.quote) {
-        acc.quote = await loadQuote(target);
-        setData({ ...acc });
+      const quote=await section("quote",()=>loadQuote(target));
+      if(!active())return;
+      if(!quote||!quote.ticker)throw new Error("Quotazione non disponibile per "+target+". Controlla rete e ticker.");
+      const sym=quote.ticker;
+      if(sym!==target){
+        const canonical=readAnalysisSnapshot(sym);
+        for(const key of Object.keys(canonical.data))if(key!=="quote"&&!acc[key])acc[key]=canonical.data[key];
+        publish();
       }
-      const sym = acc.quote.ticker;
-      if (!acc.fin || !acc.val) {
-        setStep(1);
-        const r = await soft(() => loadFundamentals(sym), { fin: EMPTY_FIN(), val: EMPTY_VAL() }, "Bilanci e multipli");
-        acc.fin = r.fin; acc.val = r.val;
-        if (acc.val.marketCap && !acc.quote.marketCap) acc.quote = { ...acc.quote, marketCap: acc.val.marketCap };
-        setData({ ...acc });
-      }
-      if (acc.events === undefined) {
-        setStep(2);
-        acc.events = await soft(() => loadCorporateEvents(sym), null, "Calendario utili e dividendi");
-        setData({ ...acc });
-      }
-      if (!acc.an || acc.mkt === undefined) {
-        setStep(2);
-        const [an, mkt] = await Promise.all([
-          acc.an ? acc.an : soft(() => loadAnalysts(sym, "", avKey), EMPTY_AN(), "Analisti"),
-          acc.mkt !== undefined ? acc.mkt : soft(() => loadMarket(sym, acc.quote.history), null, "Confronto con l'indice"),
-        ]);
-        acc.an = an; acc.mkt = mkt;
-        setData({ ...acc });
-      }
-      setStep(3);
-      if (!acc.newsRaw) acc.newsRaw = await soft(() => loadNewsRaw(sym), [], "Notizie");
-      if (!acc.final || acc.final.failed) {
-        const S = computeScores(acc, buildTech(acc.quote));
-        if (!S.readiness.ready) {
-          acc.final = { failed: true, reason: S.readiness.reasons.join("; ") };
-          acc.news = mergeNews(acc, null);
-          w.push("Giudizio sospeso: qualità o copertura dei dati insufficiente.");
-          setWarns([...w]);
-        } else {
+      setStep(acc.fin&&acc.val?STEPS.length:1);
+      const fundamental=async()=>{
+        const cachedFin=!force?readAnalysisSection(sym,"fin"):null;
+        const cachedVal=!force?readAnalysisSection(sym,"val"):null;
+        if(cachedFin&&cachedVal){
+          acc.fin=cachedFin.value;acc.val=cachedVal.value;
+          clearNotice("fin");clearNotice("val");publish();return;
+        }
+        try {
+          const {fin,val}=await loadFundamentals(sym,{includePeers:false});
+          if(!active())return;
+          put("fin",fin,sym);put("val",val,sym);
+        } catch(e) {
+          if(!active())return;
+          warn("fin",(acc.fin&&acc.val?"Bilanci da cache precedente: ":"Bilanci non disponibili: ")+String(e.message||e).slice(0,100));
+        }
+      };
+      const core=fundamental();
+      // Optional requests start concurrently and update their own sections on completion.
+      const extras=[
+        section("events",()=>loadCorporateEvents(sym)),
+        section("an",()=>loadAnalysts(sym,"",getApiKey("alphavantage").trim())),
+        section("mkt",()=>loadMarket(sym,quote.history)),
+        section("newsRaw",()=>loadNewsRaw(sym)),
+      ];
+      const peers=(async()=>{
+        const cached=!force?readAnalysisSection(sym,"peers"):null;
+        let peerData=cached?.value;
+        if(!peerData){
           try {
-            const out = await callGeminiAPI(SYSTEM_PROMPT, buildUserPrompt(acc, S, labelOf(S.overall)), false);
-            const { news: nw, ...fin } = out;
-            acc.final = fin; acc.news = mergeNews(acc, nw);
-          } catch (e) {
-            acc.final = { failed: true };
-            acc.news = mergeNews(acc, null);
-            w.push("Commento e notizie: Gemini non disponibile (" + e.message.slice(0, 120) + ")"); setWarns([...w]);
+            peerData=await loadPeerValuation(sym);
+            if(active()&&peerData)writeAnalysisSection(sym,"peers",peerData);
+          }catch(e){
+            if(active())warn("peers","Confronto settoriale non disponibile: "+String(e.message||e).slice(0,80));
+            return;
           }
         }
-        setData({ ...acc });
+        await core;
+        if(!active()||!peerData||!acc.val)return;
+        const metrics=(acc.val.metrics||[]).map(m=>({...m,sector:peerData.sector?.[m.k]??null}));
+        const source=String(acc.val.source||"Yahoo Finance").replace(/ \+ peer \(Yahoo\)/g,"");
+        const next={...acc.val,metrics,peers:peerData.peers||[],source:source+(peerData.peers?.length?" + peer (Yahoo)":"")};
+        put("val",next,sym);
+      })();
+      await core;
+      if(!active())return;
+      setStep(STEPS.length); // Report ready; optional data and Gemini continue separately.
+      await Promise.allSettled([...extras,peers]);
+      if(!active()||!acc.fin||!acc.val)return;
+      const S=computeScores(acc,buildTech(acc.quote));
+      if(!S.readiness.ready){
+        acc.final={failed:true,reason:S.readiness.reasons.join("; ")};
+        acc.news=mergeNews(acc,null);
+        warn("readiness","Giudizio AI sospeso: copertura o qualità dei dati insufficiente.");
+        publish();return;
       }
-      setStep(STEPS.length);
-      if (acc.final && !acc.final.failed) cachePut([target, sym], acc, w);
-    } catch (e) {
-      setErr(e.message === "NOT_FOUND" ? "Titolo non trovato. Controlla sigla o nome (es. AAPL, ENI.MI)." : "Errore nel recupero dei dati: " + e.message);
-      setStep(-1);
+      const fingerprint=analysisFingerprint(acc);
+      const saved=!force?readAnalysisSection(sym,"ai"):null;
+      if(saved?.value?.fingerprint===fingerprint){
+        acc.final=saved.value.final;acc.news=saved.value.news;publish();return;
+      }
+      setAiBusy(true);
+      try {
+        const out=await callGeminiAPI(SYSTEM_PROMPT,buildUserPrompt(acc,S,labelOf(S.overall)));
+        if(!active())return;
+        const {news:nw,...fin}=out;
+        acc.final=fin;acc.news=mergeNews(acc,nw);
+        writeAnalysisSection(sym,"ai",{fingerprint,final:acc.final,news:acc.news});
+        clearNotice("ai");publish();
+      }catch(e){
+        if(!active())return;
+        acc.final={failed:true};acc.news=mergeNews(acc,null);
+        warn("ai","Commento Gemini non disponibile: "+String(e.message||e).slice(0,130));
+        publish();
+      }finally{if(active())setAiBusy(false);}
+    }catch(e){
+      if(!active())return;
+      setErr(e.message==="NOT_FOUND"?"Titolo non trovato: verifica il ticker.":"Errore nel recupero dei dati: "+String(e.message||e));
+      setStep(-1);setAiBusy(false);
     }
   }
 
