@@ -6,12 +6,12 @@ Il workspace 2.0 è una versione sperimentale. La scheda Mercati interroga Alpha
 ## Avvio web
 1. Installare Node.js 22 LTS.
 2. Clonare il repository e spostarsi nella cartella.
-3. Eseguire \`npm install\`.
-4. Eseguire \`npm test\` e poi \`npm run build\`.
-5. Eseguire \`npm run dev\` per l'anteprima locale.
+3. Eseguire `npm install`.
+4. Eseguire `npm test` e poi `npm run build`.
+5. Eseguire `npm run dev` per l'anteprima locale.
 
 ## Android
-Il workflow GitHub Actions \`Android debug APK\` crea un progetto Capacitor Android temporaneo, compila un APK debug e lo pubblica come artifact se tutti gli step hanno esito positivo. L'APK debug è per installazione e test, non è una release firmata per Google Play. Per una release servono keystore, firma, versioning, test dispositivo e policy privacy.
+Il workflow GitHub Actions `Android debug APK` crea un progetto Capacitor Android temporaneo, compila un APK debug e lo pubblica come artifact se tutti gli step hanno esito positivo. L'APK debug è per installazione e test, non è una release firmata per Google Play. Per una release servono keystore, firma, versioning, test dispositivo e policy privacy.
 
 ## Prezzi giornalieri Alpha Vantage
 1. Richiedere una chiave personale su https://www.alphavantage.co/support/#api-key.
@@ -32,7 +32,7 @@ La chiave non viene salvata nel workspace, ma viene trasmessa a FRED nell'URL HT
 
 ## Registro portafoglio
 - Inserimento manuale: ticker, lato BUY/SELL, quantità, prezzo, valuta, commissioni e data.
-- Import CSV: il file deve contenere le colonne \`date;symbol;side;quantity;price;currency;fees\`. Sono accettati anche gli equivalenti italiani \`data;strumento;operazione;quantita;prezzo;valuta;commissioni\`.
+- Import CSV: il file deve contenere le colonne `date;symbol;side;quantity;price;currency;fees`. Sono accettati anche gli equivalenti italiani `data;strumento;operazione;quantita;prezzo;valuta;commissioni`.
 - Lati accettati: BUY/Acquisto/Compra e SELL/Vendita/Vendi.
 - Formati data accettati: YYYY-MM-DD e DD/MM/YYYY.
 - Numeri decimali con virgola sono supportati nel CSV con separatore punto e virgola.
