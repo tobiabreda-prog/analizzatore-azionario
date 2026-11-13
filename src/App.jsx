@@ -381,14 +381,21 @@ export default function AnalizzatoreAzionario() {
       if (!acc.newsRaw) acc.newsRaw = await soft(() => loadNewsRaw(sym), [], "Notizie");
       if (!acc.final || acc.final.failed) {
         const S = computeScores(acc, buildTech(acc.quote));
-        try {
-          const out = await callGeminiAPI(SYSTEM_PROMPT, buildUserPrompt(acc, S, labelOf(S.overall)), false);
-          const { news: nw, ...fin } = out;
-          acc.final = fin; acc.news = mergeNews(acc, nw);
-        } catch (e) {
-          acc.final = { failed: true };
+        if (!S.readiness.ready) {
+          acc.final = { failed: true, reason: S.readiness.reasons.join("; ") };
           acc.news = mergeNews(acc, null);
-          w.push("Commento e notizie: Gemini non disponibile (" + e.message.slice(0, 120) + ")"); setWarns([...w]);
+          w.push("Giudizio sospeso: qualità o copertura dei dati insufficiente.");
+          setWarns([...w]);
+        } else {
+          try {
+            const out = await callGeminiAPI(SYSTEM_PROMPT, buildUserPrompt(acc, S, labelOf(S.overall)), false);
+            const { news: nw, ...fin } = out;
+            acc.final = fin; acc.news = mergeNews(acc, nw);
+          } catch (e) {
+            acc.final = { failed: true };
+            acc.news = mergeNews(acc, null);
+            w.push("Commento e notizie: Gemini non disponibile (" + e.message.slice(0, 120) + ")"); setWarns([...w]);
+          }
         }
         setData({ ...acc });
       }
@@ -805,7 +812,8 @@ export default function AnalizzatoreAzionario() {
                 <div className="text-sm space-y-1">
                   {Object.entries(WEIGHTS).map(([k, w]) => (<div key={k} className="flex justify-between border-b py-1" style={{ borderColor: th.grid }}><span>{k} <span className={th.mute}>(peso {Math.round(w * 100)}%)</span></span><b>{S.scores[k] != null ? nf(S.scores[k], 0) : "n.d."}</b></div>))}
                   <div className="flex justify-between pt-1 text-base"><span>Punteggio complessivo</span><b>{S.overall != null ? nf(S.overall, 0) + "/100" : "n.d."}</b></div>
-                  <div className={`text-xs ${th.mute}`}>Media ponderata sui soli punteggi disponibili (pesi rinormalizzati). Affidabilità analisi: {S.rel}%</div>
+                  <div className={`text-xs ${th.mute}`}>Media ponderata sui soli punteggi disponibili. Affidabilità analisi: {S.rel}%</div>
+                  {!S.readiness.ready && <div role="alert" className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs"><b>Segnale sospeso — dati insufficienti.</b><ul className="list-disc pl-4 mt-1">{S.readiness.reasons.map((reason,i)=><li key={i}>{reason}</li>)}</ul></div>}
                 </div>
               </div>
             </Card>
