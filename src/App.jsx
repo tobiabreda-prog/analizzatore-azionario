@@ -228,7 +228,7 @@ function mergeNews(acc, nw) {
 }
 
 // ---------- Memoria locale: stesso titolo entro 30 minuti = nessuna nuova richiesta ----------
-const CACHE_KEY = "an_cache_v2", CACHE_TTL = 30 * 60 * 1000;
+const CACHE_KEY = "an_cache_v3", CACHE_TTL = 30 * 60 * 1000;
 const cKey = (t) => t.trim().toUpperCase();
 function cacheRead() { try { return JSON.parse(localStorage.getItem(CACHE_KEY)) || {}; } catch (e) { return {}; } }
 function cacheGet(t) { const e = cacheRead()[cKey(t)]; return e && Date.now() - e.ts < CACHE_TTL ? e : null; }
