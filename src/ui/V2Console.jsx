@@ -23,10 +23,10 @@ const download = (name, text) => {
  setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
 
-export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},analysisData=null,onSelectSymbol=()=>{}}){
+export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},analysisData=null,onSelectSymbol=()=>{},initialTab="watchlist"}){
  const [symbols,setSymbols] = useState([]);
  const [input,setInput] = useState("");
- const [tab,setTab] = useState("valuation");
+ const [tab,setTab] = useState(initialTab);
  const [loaded,setLoaded] = useState(false);
  const [error,setError] = useState("");
  const [notice,setNotice] = useState("");
@@ -58,6 +58,15 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
   try{persist(symbols.filter(x=>x!==symbol));setNotice(symbol+" rimosso.");}
   catch{setError("Impossibile salvare la modifica.");}
  };
+ const saveCurrent=()=>{
+  if(!current)return;
+  setError("");setNotice("");
+  try{
+   if(!symbols.includes(current))persist([...symbols,current].slice(0,200));
+   setNotice(current+" presente nella watchlist.");
+   setTab("watchlist");
+  }catch{setError("Salvataggio locale non disponibile.");}
+ };
  const exportCsv=()=>download("watchlist-fair-value.csv",["symbol",...symbols.map(csvEscape)].map((line,i)=>i===0?'"symbol"':line).join("\r\n")+"\r\n");
  const importCsv=async(e)=>{
   const file=e.target.files?.[0];if(!file)return;
@@ -79,8 +88,8 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
    {error&&<div role="alert" className="rounded-lg border border-amber-500/50 p-3 text-sm flex gap-2"><AlertTriangle size={17}/>{error}</div>}
    {notice&&<div role="status" className="rounded-lg border border-emerald-500/50 p-3 text-sm">{notice}</div>}
    {tab==="valuation"&&<div className="space-y-3">
-    <p className={`text-sm ${muted}`}>Il Fair Value utilizza i dati del titolo selezionato nella watchlist e le ipotesi che inserisci. Verifica sempre data e fonte: non è una quotazione in tempo reale.</p>
-    {current&&<button type="button" onClick={()=>{setInput(current);setTab("watchlist");}} className="rounded-lg border px-3 py-2 text-sm flex gap-2 items-center"><Plus size={15}/>Aggiungi {current} alla watchlist</button>}
+    <p className={`text-sm ${muted}`}>Titolo selezionato: <strong>{current||"nessuno"}</strong>. Il Fair Value utilizza i dati del titolo selezionato nella watchlist e le ipotesi che inserisci. Verifica sempre data e fonte: non è una quotazione in tempo reale.</p>
+    {current&&<button type="button" onClick={saveCurrent} className="rounded-lg border px-3 py-2 text-sm flex gap-2 items-center"><Plus size={15}/>Aggiungi {current} alla watchlist</button>}
     <FairValuePanel key={current||"no-symbol"} dark={dark} analysisData={analysisData}/>
    </div>}
    {tab==="watchlist"&&<section className={`rounded-xl border p-4 space-y-4 ${card}`}>
