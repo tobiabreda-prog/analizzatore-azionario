@@ -18,8 +18,8 @@ export async function loadEcbSeries({ flowRef, key, startPeriod, endPeriod, fetc
   const url = new URL(`${ECB_BASE}/${flowRef}`);
   url.search = new URLSearchParams({ ...(startPeriod ? { startPeriod } : {}), ...(endPeriod ? { endPeriod } : {}), detail: "dataonly" });
   const response = await fetchImpl(url, { headers: { Accept: "text/csv", ...(key ? { "Ocp-Apim-Subscription-Key": key } : {}) } });
-  if (!response.ok) throw new Error(`ECB HTTP ${response.status}`);
-  const csv = (await response.text()).replace(/^\\uFEFF/,"").trim();
+  const csv = (await response.text()).replace(/^\uFEFF/,"").trim();
+  const lines = csv.split(/\r?\n/);
   const lines = csv.split(/\\r?\\n/);
   if (lines.length < 2) return [];
   const headers = parseCsvLine(lines[0]);
