@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { ComposedChart, LineChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell } from "recharts";
 import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, loadCorporateEvents, diagnostics } from "./data.js";
 import { printReport } from "./report.js";
+import V2Console from "./ui/V2Console.jsx";
 import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key, Printer } from "lucide-react";
 
 const POPULAR_TICKERS = [
@@ -261,6 +262,7 @@ export default function AnalizzatoreAzionario() {
     if (!m) { m = document.createElement("meta"); m.name = "theme-color"; document.head.appendChild(m); }
     m.content = bg;
   }, [dark]);
+  const [showV2, setShowV2] = useState(false);
   const [input, setInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [cur, setCur] = useState("");
@@ -464,12 +466,15 @@ export default function AnalizzatoreAzionario() {
 
   const cfColor = (n) => (n == null || isNaN(n) ? "" : n > 0 ? "text-emerald-500" : n < 0 ? "text-red-500" : "");
 
+  if (showV2) return <V2Console dark={dark} onBack={() => setShowV2(false)} />;
+
   return (
     <div className={`min-h-screen ${th.bg} ${dark ? "theme-dark" : "theme-light"}`}>
       <div className="max-w-5xl mx-auto p-3 sm:p-5 space-y-4">
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2"><TrendingUp className="text-emerald-500" />Analisi Finanziaria</h1>
           <div className="flex gap-2">
+            <button onClick={() => setShowV2(true)} className={`px-2 py-1.5 rounded-lg border text-xs font-semibold ${th.card}`} aria-label="Apri workspace 2.0">2.0</button>
             <button onClick={() => setShowKey(!showKey)} className={`p-2 rounded-lg border ${th.card}`} aria-label="Chiave API"><Key size={16} /></button>
             <button onClick={() => { const nd = !dark; setDark(nd); setThemeFixed(true); try { localStorage.setItem("theme", nd ? "dark" : "light"); } catch (e) {} }} className={`p-2 rounded-lg border ${th.card}`} aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
           </div>
