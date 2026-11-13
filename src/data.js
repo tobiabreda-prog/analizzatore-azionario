@@ -329,6 +329,10 @@ async function alphaOverview(symbol, key) {
   const ck = "av_ov_" + symbol;
   try { const c = JSON.parse(store.get(ck) || "null"); if (c && c.d === today()) return c.o; } catch (e) { /* cache non valida */ }
   if (store.get("av_block") === today()) throw new Error("Alpha Vantage: limite giornaliero gia' raggiunto oggi (piano gratuito: 25 chiamate/giorno)");
+  const quotaKey = "av_count_" + today();
+  const used = Number(store.get(quotaKey) || 0);
+  if (Number.isFinite(used) && used >= 25) { store.set("av_block", today()); throw new Error("Alpha Vantage: quota gratuita locale di 25 richieste/giorno esaurita"); }
+  store.set(quotaKey, String((Number.isFinite(used) ? used : 0) + 1));
   const r = await httpGet(`https://www.alphavantage.co/query?function=OVERVIEW&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(key)}`);
   if (r.status !== 200 || !r.data || typeof r.data !== "object") throw new Error(`Alpha Vantage HTTP ${r.status}`);
   if (r.data.Information || r.data.Note) { store.set("av_block", today()); throw new Error("Alpha Vantage: limite giornaliero raggiunto (25 chiamate/giorno nel piano gratuito)"); }
