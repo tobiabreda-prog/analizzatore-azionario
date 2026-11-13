@@ -433,7 +433,9 @@ export default function AnalizzatoreAzionario() {
   const q = data.quote, f = data.fin, v = data.val, a = data.an, n = data.news, fi = data.final, mkt = data.mkt;
   const up = (x) => x != null && x >= 0;
 
-  const Card = ({ title, children, meta }) => (
+  // Keep report card component types stable across progressive updates.
+  // Otherwise every partial API response remounts ALL charts and inputs.
+  const Card = useMemo(() => ({ title, children, meta }) => (
     <section className={`app-card rounded-xl border p-4 ${th.card}`}>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h2 className="font-semibold text-base">{title}</h2>
@@ -441,8 +443,8 @@ export default function AnalizzatoreAzionario() {
       </div>
       {children}
     </section>
-  );
-  const Meta = ({ d, src, extra }) => {
+  ),[th.card]);
+  const Meta = useMemo(() => ({ d, src, extra }) => {
     const old = daysOld(d); const stale = extra ?? (old != null && old > 2);
     return (
       <div className={`flex flex-wrap items-center gap-1.5 text-xs ${th.mute}`}>
@@ -451,8 +453,10 @@ export default function AnalizzatoreAzionario() {
         {stale && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 font-medium flex items-center gap-1"><AlertTriangle size={11} />Dato non aggiornato</span>}
       </div>
     );
-  };
-  const Stat = ({ k, v, c }) => (<div className={`rounded-lg border p-2 ${th.card}`}><div className={`text-xs ${th.mute}`}>{k}</div><div className={`font-semibold ${c || ""}`}>{v}</div></div>);
+  },[th.mute]);
+  const Stat = useMemo(() => ({ k, v, c }) => (
+    <div className={`rounded-lg border p-2 ${th.card}`}><div className={`text-xs ${th.mute}`}>{k}</div><div className={`font-semibold ${c || ""}`}>{v}</div></div>
+  ),[th.card,th.mute]);
   const chartH = 190;
   const tip = {
     contentStyle: { background: dark ? "#0f172a" : "#ffffff", border: "1px solid " + (dark ? "#475569" : "#cbd5e1"), borderRadius: 8, fontSize: 12, color: dark ? "#f1f5f9" : "#0f172a" },
