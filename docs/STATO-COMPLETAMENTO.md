@@ -8,7 +8,7 @@ Aggiornato: 13 novembre 2026. Branch di lavoro: `feature/analizzatore-2-completi
 - Pannello Fair Value DCF a tre scenari: precompila FCF e debito netto dall'analisi corrente quando disponibili; richiede conferma/inserimento delle azioni diluite e delle ipotesi. Probabilità convenzionali 25/50/25, non calibrate.
 - Quadro macro: 12 serie FRED e due serie ECB (cambio USD/EUR giornaliero e tasso depositi BCE); spread 10Y Italia-Germania mensile come proxy OECD/FRED quando le date coincidono; classificazione descrittiva del rischio USA con controlli di freschezza e sufficienza.
 - Portafoglio: registro acquisti/vendite, costo medio ponderato, P&L realizzato, commissioni, import/export CSV e backup/restore JSON.
-- Calendario earnings/dividendi: eventi manuali non confermati nel workspace; calendario automatico disponibile nella schermata di analisi legacy tramite Yahoo.
+- Earnings & Dividend Intelligence: prossimo earnings date, stime EPS/ricavi, storico sorprese, dividend yield, payout ed ex-date sono mostrati nel workspace quando disponibili dall'analisi principale Yahoo; feed non ufficiale e da verificare. Eventi manuali restano non confermati.
 - Backtest di ricerca SMA 20/50 su prezzi daily Alpha Vantage, esecuzione alla barra successiva, commissione fissa preimpostata a 9,95 per lato (modificabile), commissioni variabili e slippage configurabili; output con CAGR, drawdown, volatilità, Sharpe e Sortino.
 - Test unitari per gate, DCF, regime macro, portafoglio, indicatori, adapter e segnali; smoke test browser Playwright aggiunto alla CI.
 - Workflow GitHub Actions per test/build web e APK Android debug.
@@ -17,7 +17,7 @@ Aggiornato: 13 novembre 2026. Branch di lavoro: `feature/analizzatore-2-completi
 - SEC EDGAR/XBRL: adapter tecnico presente, ma non collegato alla schermata principale; l'accesso browser diretto richiede verifica CORS/User-Agent e un'integrazione robusta.
 - ECB Data Portal: usato per la serie giornaliera USD per EUR e per il tasso sui depositi BCE; chiavi SDMX verificate sulla documentazione ufficiale.
 - FRED: API gratuita con chiave personale; dodici serie macro, incluse le serie OECD sui rendimenti governativi decennali di Italia e Germania. Frequenza e ritardi sono quelli ufficiali delle serie.
-- Alpha Vantage: API key personale gratuita e quota giornaliera; prezzi daily, non realtime. Verificare la copertura del ticker e le condizioni del piano.
+- Alpha Vantage: API key personale gratuita e quota giornaliera; prezzi daily, non realtime. Il backtest usa commissione fissa preimpostata a 9,95 per lato (adattabile) e capitale iniziale minimo 500. Verificare la copertura del ticker e le condizioni del piano.
 - Yahoo Finance: usato dall'analisi legacy per prezzi, fondamentali, multipli, news ed eventi. Endpoint non ufficiale, soggetto a modifiche/blocchi; non è un feed realtime né una fonte con licenza verificata per uso/distribuzione.
 - Nessun provider a pagamento richiesto dal codice; alcune fonti richiedono registrazione e chiavi gratuite. La disponibilità gratuita può cambiare.
 - Il portafoglio usa costo medio ponderato e non implementa lotti fiscali, FIFO/LIFO o fiscalità italiana.
