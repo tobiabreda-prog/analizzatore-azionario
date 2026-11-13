@@ -5,6 +5,10 @@ on:
     branches: [main, "feature/**"]
   workflow_dispatch:
 
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
