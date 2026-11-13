@@ -35,7 +35,7 @@ async function callGeminiAPI(systemInstruction, userPrompt) {
   try { apiKey = localStorage.getItem("gemini_api_key") || ""; } catch (e) {}
   if (!apiKey) throw new Error("Chiave API Gemini mancante: inseriscila con l'icona della chiave in alto.");
   const model = "gemini-3.5-flash-lite";
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   
   const payload = {
     contents: [{ role: "user", parts: [{ text: userPrompt }] }],
@@ -51,7 +51,7 @@ async function callGeminiAPI(systemInstruction, userPrompt) {
     try {
       const response = await fetch(apiUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify(payload)
       });
 
@@ -283,8 +283,8 @@ export default function AnalizzatoreAzionario() {
     try {
       const k = keyVal.trim();
       if (!k) throw new Error("Inserisci prima la chiave Gemini.");
-      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=" + encodeURIComponent(k), {
-        method: "POST", headers: { "Content-Type": "application/json" },
+      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent", {
+        method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": k },
         body: JSON.stringify({ contents: [{ parts: [{ text: '{"ok":true}' }] }], generationConfig: { responseMimeType: "application/json", maxOutputTokens: 32 } })
       });
       const body = await r.text();
