@@ -65,16 +65,9 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Icona personalizzata (moneta da 1 euro)
+      - name: Genera icone Android personalizzate
         working-directory: ${{ env.APP_DIR }}
-        run: |
-          if [ -f res-icons.zip ]; then
-            unzip -o res-icons.zip -d android/app/src/main/res
-            echo "Icona personalizzata applicata"
-            ls -la android/app/src/main/res/mipmap-xxxhdpi
-          else
-            echo "::warning::res-icons.zip non trovato nel repository: resta l'icona predefinita"
-          fi
+        run: node scripts/generate-android-icons.mjs
 
       - name: Stampa report su Android (plugin nativo)
         working-directory: ${{ env.APP_DIR }}
