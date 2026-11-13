@@ -45,11 +45,36 @@ export async function researchWacc({symbol,currency,signal}={}){
  if(!/^[A-Z0-9.^:_-]{1,30}$/.test(symbol||""))throw new Error("Ticker non valido.");
  if(!/^[A-Z]{3}$/.test(currency||""))throw new Error("Valuta non disponibile: impossibile stimare il risk-free coerente.");
  const prompt=`Ricerca WACC per ${symbol} (valuta DCF ${currency}). Cerca prima su investing.com, poi confronta con bilanci ufficiali, SEC, BCE/Fed e dataset NYU Stern Damodaran. Identifica società, mercato e settore. Non inventare numeri o fonti. Usa risk-free coerente con la valuta dei flussi; equity risk premium coerente con esposizione geografica; beta bottom-up se possibile; costo debito e tax rate coerenti con i bilanci; equityWeight = equity/(equity+debt) basato su valori di mercato. Per banche e assicurazioni rispondi con {"unsupported":true,"reason":"..."}: il DCF FCFF/WACC non è adeguato. Se non hai TUTTI e sei i parametri supportati da URL HTTPS consultati e date, rispondi {"unsupported":true,"reason":"dati insufficienti"}. Altrimenti restituisci SOLO JSON con riskFree, beta, equityRiskPremium, costOfDebt, taxRate, equityWeight; ogni parametro è {"value":numero,"url":"URL fonte consultata","date":"YYYY-MM-DD"}. Percentuali espresse come punti percentuali, beta e equityWeight come numeri puri (0..1 per equityWeight). Nessuna spiegazione extra.`;
- const response=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",{
-  method:"POST",signal,headers:{"Content-Type":"application/json","x-goog-api-key":key},
-  body:JSON.stringify({contents:[{parts:[{text:prompt}]}],tools:[{google_search:{}}],generationConfig:{temperature:0,maxOutputTokens:1600}})
+ // Discover models available to this exact key instead of relying on a hardcoded model.
+ const listResponse=await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",{
+  signal,headers:{"x-goog-api-key":key}
  });
- if(!response.ok)throw new Error("Ricerca Gemini non disponibile (HTTP "+response.status+"). Verifica chiave, modello e quota.");
+ if(!listResponse.ok){
+  const detail=await listResponse.json().catch(()=>({}));
+  throw new Error("Impossibile verificare i modelli Gemini (HTTP "+listResponse.status+"): "+String(detail.error?.message||"controlla chiave e accesso API").slice(0,220));
+ }
+ const available=(await listResponse.json()).models||[];
+ const candidates=available.filter(m=>(m.supportedGenerationMethods||[]).includes("generateContent")&&/gemini.*flash/i.test(m.name||"")&&!/preview|exp/i.test(m.name||""));
+ const preferred=["gemini-3.5-flash-lite","gemini-2.5-flash-lite","gemini-2.5-flash","gemini-2.0-flash-lite","gemini-2.0-flash"];
+ candidates.sort((a,b)=>{
+  const rank=m=>{const n=String(m.name).split("/").pop();const i=preferred.indexOf(n);return i<0?preferred.length:i;};
+  return rank(a)-rank(b);
+ });
+ if(!candidates.length)throw new Error("La tua chiave non espone modelli Gemini Flash/Lite compatibili con generateContent.");
+ let response=null, lastError="";
+ for(const model of candidates.slice(0,4)){
+  response=await fetch("https://generativelanguage.googleapis.com/v1beta/"+model.name+":generateContent",{
+   method:"POST",signal,headers:{"Content-Type":"application/json","x-goog-api-key":key},
+   body:JSON.stringify({contents:[{parts:[{text:prompt}]}],tools:[{google_search:{}}],generationConfig:{temperature:0,maxOutputTokens:2200}})
+  });
+  if(response.ok)break;
+  const details=await response.json().catch(()=>({}));
+  lastError=String(details.error?.message||"HTTP "+response.status).slice(0,220);
+  // Do not retry on quota/auth errors: avoid spending calls or hiding the real cause.
+  if(response.status===401||response.status===403||response.status===429)break;
+  if(response.status!==404&&response.status!==400)break;
+ }
+ if(!response?.ok)throw new Error("Ricerca Gemini non disponibile: "+lastError+". Modelli individuati: "+candidates.slice(0,4).map(m=>m.name).join(", "));
  const json=await response.json();
  const candidate=json.candidates?.[0];
  const groundedUrls=new Set((candidate?.groundingMetadata?.groundingChunks||[])
