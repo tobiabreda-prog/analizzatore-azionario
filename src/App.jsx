@@ -103,6 +103,23 @@ const clamp = (x) => Math.max(0, Math.min(100, x));
 const sc = (x, lo, hi) => (num(x) == null ? null : clamp(((x - lo) / (hi - lo)) * 100));
 const avg = (a) => { const v = a.filter((x) => x != null); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
 const daysOld = (d) => { const t = Date.parse(d); return isNaN(t) ? null : (Date.now() - t) / 864e5; };
+export function buildAnnualMetrics(rows = []) {
+  return (Array.isArray(rows) ? rows : [])
+    .slice()
+    .sort((a, b) => a.y - b.y)
+    .map((row, index, sorted) => {
+      const revenue = num(row?.rev);
+      const previousRevenue = index > 0 ? num(sorted[index - 1]?.rev) : null;
+      return {
+        ...row,
+        gm: revenue > 0 && num(row?.gp) != null ? (row.gp / revenue) * 100 : null,
+        om: revenue > 0 && num(row?.op) != null ? (row.op / revenue) * 100 : null,
+        nm: revenue > 0 && num(row?.ni) != null ? (row.ni / revenue) * 100 : null,
+        g: revenue > 0 && previousRevenue > 0 ? (revenue / previousRevenue - 1) * 100 : null
+      };
+    });
+}
+
 
 const sma = (a, n) => a.map((_, i) => (i < n - 1 ? null : a.slice(i - n + 1, i + 1).reduce((s, x) => s + x, 0) / n));
 const ema = (a, n) => { const k = 2 / (n + 1); let p = null; return a.map((x) => (p = p == null ? x : x * k + p * (1 - k))); };
@@ -132,13 +149,15 @@ export function computeScores(D, tech) {
   const last = tech[tech.length - 1];
   const s50 = num(q?.sma50) ?? last?.s50, s200 = num(q?.sma200) ?? last?.s200, p = num(q?.price);
   const rs = num(q?.rsi14) ?? last?.rsi;
-  const tS = q ? avg([p != null && s200 != null ? (p > s200 ? 100 : 0) : null, p != null && s50 != null ? (p > s50 ? 100 : 0) : null, rs != null ? clamp(100 - Math.abs(rs - 55) * 3) : null, last ? (last.hist > 0 ? 100 : 25) : null]) : null;
+  const tS = q ? avg([p != null && s200 != null ? (p > s200 ? 100 : 0) : null, p != null && s50 != null ? (p > s50 ? 100 : 0) : null, rs != null ? clamp(100 - Math.abs(rs - 55) * 3) : null, last && num(last.hist) != null ? (last.hist > 0 ? 100 : 25) : null]) : null;
   const an = (f?.annual || []).slice().sort((x, y) => x.y - y.y), la = an[an.length - 1], fa = an[0], pa = an[an.length - 2];
   const cagr = la && fa && an.length > 1 && fa.rev > 0 && la.rev > 0 ? (Math.pow(la.rev / fa.rev, 1 / (an.length - 1)) - 1) * 100 : null;
-  const epsG = la && pa && pa.eps > 0 ? (la.eps / pa.eps - 1) * 100 : null;
+  const epsG = la && pa && num(la.eps) != null && num(pa.eps) > 0 ? (la.eps / pa.eps - 1) * 100 : null;
   const gS = avg([sc(cagr, -5, 15), sc(epsG, -10, 20)]);
   const b = f?.balance || {};
-  const nm = la && la.rev ? (la.ni / la.rev) * 100 : null, om = la && la.rev ? (la.op / la.rev) * 100 : null;
+  // Non trasformare NI/EBIT mancanti in margini pari a zero: zero è un dato, null è assenza.
+  const nm = la && num(la.rev) > 0 && num(la.ni) != null ? (la.ni / la.rev) * 100 : null;
+  const om = la && num(la.rev) > 0 && num(la.op) != null ? (la.op / la.rev) * 100 : null;
   const rS = avg([sc(nm, 0, 25), sc(om, 0, 30), sc(b.roe, 0, 25)]);
   const nde = la && la.ebitda > 0 && num(b.netDebt) != null ? b.netDebt / la.ebitda : null;
   const sS = avg([nde != null ? sc(4 - nde, 0, 4) : null, sc(b.currentRatio, 0.8, 2), sc(b.interestCover, 1, 10)]);
@@ -428,7 +447,7 @@ export default function AnalizzatoreAzionario() {
     cursor: { fill: dark ? "rgba(148,163,184,0.18)" : "rgba(100,116,139,0.12)", stroke: dark ? C.gray : C.gray },
   };
 
-  const annual = (f?.annual || []).slice().sort((x, y) => x.y - y.y).map((r, i, arr) => ({ ...r, gm: r.rev ? (r.gp / r.rev) * 100 : null, om: r.rev ? (r.op / r.rev) * 100 : null, nm: r.rev ? (r.ni / r.rev) * 100 : null, g: i && arr[i - 1].rev ? (r.rev / arr[i - 1].rev - 1) * 100 : null }));
+  const annual = buildAnnualMetrics(f?.annual || []);
   const bal = f?.balance || {};
   const lvl = (x, lo, hi, inv) => (x == null ? "" : (inv ? x <= lo : x >= hi) ? "text-emerald-500" : (inv ? x >= hi : x <= lo) ? "text-red-500" : "text-amber-500");
   const lastT = tech[tech.length - 1];
