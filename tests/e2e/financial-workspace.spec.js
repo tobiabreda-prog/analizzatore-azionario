@@ -24,4 +24,6 @@ test("workspace opens and calculates a scenario DCF", async ({ page }) => {
   await page.getByRole("button", { name: /Earnings/ }).click();
   await expect(page.getByRole("heading", { name: "Calendario societario" })).toBeVisible();
   await expect(page.getByText(/Nessun dato automatico disponibile/)).toBeVisible();
+  await page.getByRole("button", { name: /Qualità dati/ }).click();
+  await expect(page.getByRole("heading", { name: "Data Quality & Provenienza" })).toBeVisible();
 });
