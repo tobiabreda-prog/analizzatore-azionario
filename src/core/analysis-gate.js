@@ -30,11 +30,13 @@ export function assessAnalysisReadiness({ quote, fin, val, scores = {}, now = ne
   }
 
   const history = Array.isArray(quote?.history) ? quote.history : [];
-  const validHistory = history.every((row) =>
+  const denseHistory = Array.from({ length: history.length }, (_, index) => index in history).every(Boolean);
+  const validHistory = denseHistory && history.every((row) =>
     Array.isArray(row) && validIsoDate(row[0]) && finite(row[1]) && row[1] > 0
   );
   const chronologicalHistory = history.every((row, index) =>
-    index === 0 || row[0] > history[index - 1][0]
+    Array.isArray(row) && validIsoDate(row[0]) &&
+    (index === 0 || Array.isArray(history[index - 1]) && row[0] > history[index - 1][0])
   );
   if (history.length < 40) reasons.push("Storico prezzi insufficiente (servono almeno 40 osservazioni settimanali)");
   if (!validHistory || !chronologicalHistory) reasons.push("Storico prezzi non valido o non cronologico");
