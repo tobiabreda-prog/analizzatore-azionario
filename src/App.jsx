@@ -2,6 +2,8 @@ import { useState, useMemo, useEffect } from "react";
 import { ComposedChart, LineChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell } from "recharts";
 import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, loadCorporateEvents, diagnostics } from "./data.js";
 import { printReport } from "./report.js";
+import { assessAnalysisReadiness } from "./core/analysis-gate.js";
+import V2Console from "./ui/V2Console.jsx";
 import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key, Printer } from "lucide-react";
 
 const POPULAR_TICKERS = [
@@ -28,13 +30,12 @@ function parseJSON(txt) {
   } catch (e) { return null; }
 }
 
-async function callGeminiAPI(systemInstruction, userPrompt, useSearch = true) {
+async function callGeminiAPI(systemInstruction, userPrompt) {
   let apiKey = "";
   try { apiKey = localStorage.getItem("gemini_api_key") || ""; } catch (e) {}
   if (!apiKey) throw new Error("Chiave API Gemini mancante: inseriscila con l'icona della chiave in alto.");
-  let model = "gemini-3.5-flash-lite";
-  try { model = localStorage.getItem("gemini_model") || model; } catch (e) {}
-  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const model = "gemini-3.5-flash-lite";
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   
   const payload = {
     contents: [{ role: "user", parts: [{ text: userPrompt }] }],
@@ -42,9 +43,7 @@ async function callGeminiAPI(systemInstruction, userPrompt, useSearch = true) {
     generationConfig: { responseMimeType: "application/json", temperature: 0.3, maxOutputTokens: 3072 }
   };
 
-  if (useSearch) {
-    payload.tools = [{ "google_search": {} }];
-  }
+  // Nessun Search grounding: Gemini interpreta solo i dati già verificati.
 
   let delay = 1000;
   let rateRetried = false;
@@ -52,7 +51,7 @@ async function callGeminiAPI(systemInstruction, userPrompt, useSearch = true) {
     try {
       const response = await fetch(apiUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify(payload)
       });
 
@@ -161,11 +160,12 @@ export function computeScores(D, tech) {
   const scores = { "Trend tecnico": tS, Crescita: gS, Redditività: rS, "Solidità finanziaria": sS, Valutazione: vS, Sentiment: seS };
   let wsum = 0, tot2 = 0;
   Object.entries(scores).forEach(([k, s]) => { if (s != null) { wsum += WEIGHTS[k]; tot2 += s * WEIGHTS[k]; } });
-  const overall = wsum ? tot2 / wsum : null;
-  let rel = (Object.values(scores).filter((x) => x != null).length / 6) * 100;
+  const readiness = assessAnalysisReadiness({ quote: q, fin: f, val: v, scores });
+  const overall = readiness.ready && wsum ? tot2 / wsum : null;
+  let rel = readiness.ready ? (Object.values(scores).filter((x) => x != null).length / 6) * 100 : 0;
   const stale = daysOld(q?.asOf) > 2 || f?.isLatest === false;
   if (stale) rel -= 15;
-  return { scores, overall, rel: Math.max(0, Math.round(rel)), derived: { cagr, epsG, nm, om, nde, up, rsEx } };
+  return { scores, overall, rel: Math.max(0, Math.round(rel)), readiness, derived: { cagr, epsG, nm, om, nde, up, rsEx } };
 }
 const labelOf = (s) => (s == null ? "n.d." : s >= 75 ? "COMPRARE" : s >= 62 ? "ACCUMULARE" : s >= 45 ? "MANTENERE" : s >= 32 ? "EVITARE" : "VENDERE");
 const LABEL_COLOR = { COMPRARE: "bg-emerald-700", ACCUMULARE: "bg-lime-700", MANTENERE: "bg-amber-400 !text-slate-900", EVITARE: "bg-orange-700", VENDERE: "bg-red-700", "n.d.": "bg-slate-600" };
@@ -225,7 +225,7 @@ function mergeNews(acc, nw) {
 }
 
 // ---------- Memoria locale: stesso titolo entro 30 minuti = nessuna nuova richiesta ----------
-const CACHE_KEY = "an_cache_v2", CACHE_TTL = 30 * 60 * 1000;
+const CACHE_KEY = "an_cache_v3", CACHE_TTL = 30 * 60 * 1000;
 const cKey = (t) => t.trim().toUpperCase();
 function cacheRead() { try { return JSON.parse(localStorage.getItem(CACHE_KEY)) || {}; } catch (e) { return {}; } }
 function cacheGet(t) { const e = cacheRead()[cKey(t)]; return e && Date.now() - e.ts < CACHE_TTL ? e : null; }
@@ -261,6 +261,7 @@ export default function AnalizzatoreAzionario() {
     if (!m) { m = document.createElement("meta"); m.name = "theme-color"; document.head.appendChild(m); }
     m.content = bg;
   }, [dark]);
+  const [showV2, setShowV2] = useState(false);
   const [input, setInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [cur, setCur] = useState("");
@@ -271,44 +272,26 @@ export default function AnalizzatoreAzionario() {
   const [showKey, setShowKey] = useState(false);
   const [warns, setWarns] = useState([]);
   const [cachedAt, setCachedAt] = useState(null);
-  const [fhVal, setFhVal] = useState(() => { try { return localStorage.getItem("finnhub_key") || ""; } catch (e) { return ""; } });
   const [avVal, setAvVal] = useState(() => { try { return localStorage.getItem("av_key") || ""; } catch (e) { return ""; } });
-  const [avUsage, setAvUsage] = useState(() => {
-    try {
-      const day = new Date().toISOString().slice(0, 10);
-      const value = Number(localStorage.getItem("av_count_" + day) || 0);
-      return Number.isFinite(value) && value > 0 ? Math.min(value, 20) : 0;
-    } catch (e) { return 0; }
-  });
-  const refreshAvUsage = () => {
-    try {
-      const day = new Date().toISOString().slice(0, 10);
-      const value = Number(localStorage.getItem("av_count_" + day) || 0);
-      setAvUsage(Number.isFinite(value) && value > 0 ? Math.min(value, 20) : 0);
-    } catch (e) { setAvUsage(0); }
-  };
   const [diag, setDiag] = useState(null);
   const [diagBusy, setDiagBusy] = useState(false);
-  const runDiag = async () => { setDiagBusy(true); setDiag(null); try { setDiag(await diagnostics(fhVal.trim(), avVal.trim())); } catch (e) { setDiag([{ name: "Diagnostica", ok: false, detail: e.message }]); } refreshAvUsage(); setDiagBusy(false); };
-  const [modelVal, setModelVal] = useState(() => { try { return localStorage.getItem("gemini_model") || "gemini-3.5-flash-lite"; } catch (e) { return "gemini-3.5-flash-lite"; } });
+  const runDiag = async () => { setDiagBusy(true); setDiag(null); try { setDiag(await diagnostics("", avVal.trim())); } catch (e) { setDiag([{ name: "Diagnostica", ok: false, detail: e.message }]); } finally { setDiagBusy(false); } };
   const [testMsg, setTestMsg] = useState("");
-  const [models, setModels] = useState([]);
   const [testing, setTesting] = useState(false);
   const testKey = async () => {
-    setTesting(true); setTestMsg("Test in corso…"); setModels([]);
+    setTesting(true); setTestMsg("Verifica del modello gratuito in corso…");
     try {
       const k = keyVal.trim();
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${k}`);
-      const t = await r.text();
-      if (!r.ok) { setTestMsg(`Chiave NON valida o non abilitata (HTTP ${r.status}): ${t.slice(0, 300)}`); setTesting(false); return; }
-      const list = (JSON.parse(t).models || [])
-        .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
-        .map((m) => m.name.replace("models/", ""))
-        .filter((n) => /gemini/.test(n) && !/(embedding|tts|image|live|audio|robotics|computer|thinking-exp)/.test(n));
-      setModels(list);
-      setTestMsg(`Chiave valida. ${list.length} modelli disponibili: tocca quello da usare (consigliato un "flash").`);
-    } catch (e) { setTestMsg("Errore di rete: " + e.message); }
-    setTesting(false);
+      if (!k) throw new Error("Inserisci prima la chiave Gemini.");
+      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent", {
+        method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": k },
+        body: JSON.stringify({ contents: [{ parts: [{ text: '{"ok":true}' }] }], generationConfig: { responseMimeType: "application/json", maxOutputTokens: 32 } })
+      });
+      const body = await r.text();
+      if (!r.ok) throw new Error("Gemini HTTP " + r.status + ": " + body.slice(0, 240));
+      setTestMsg("Chiave valida: gemini-3.5-flash-lite risponde correttamente. Il piano gratuito ha limiti di utilizzo.");
+    } catch (e) { setTestMsg("Test non riuscito: " + e.message); }
+    finally { setTesting(false); }
   };
   const [keyVal, setKeyVal] = useState(() => { try { return localStorage.getItem("gemini_api_key") || ""; } catch (e) { return ""; } });
   const busy = step >= 0 && step < STEPS.length;
@@ -339,9 +322,8 @@ export default function AnalizzatoreAzionario() {
     const acc = resume ? { ...data } : {};
     const w = [];
     setWarns([]);
-    let fhKey = "";
     let avKey = "";
-    try { fhKey = (localStorage.getItem("finnhub_key") || "").trim(); avKey = (localStorage.getItem("av_key") || "").trim(); } catch (e) {}
+    try { avKey = (localStorage.getItem("av_key") || "").trim(); } catch (e) {}
     const soft = async (fn, empty, label) => {
       try { return await fn(); } catch (e) { w.push(`${label}: dati non disponibili (${e.message.slice(0, 80)})`); setWarns([...w]); return empty; }
     };
@@ -353,7 +335,7 @@ export default function AnalizzatoreAzionario() {
       const sym = acc.quote.ticker;
       if (!acc.fin || !acc.val) {
         setStep(1);
-        const r = await soft(() => loadFundamentals(sym, fhKey), { fin: EMPTY_FIN(), val: EMPTY_VAL() }, "Bilanci e multipli");
+        const r = await soft(() => loadFundamentals(sym), { fin: EMPTY_FIN(), val: EMPTY_VAL() }, "Bilanci e multipli");
         acc.fin = r.fin; acc.val = r.val;
         if (acc.val.marketCap && !acc.quote.marketCap) acc.quote = { ...acc.quote, marketCap: acc.val.marketCap };
         setData({ ...acc });
@@ -366,25 +348,31 @@ export default function AnalizzatoreAzionario() {
       if (!acc.an || acc.mkt === undefined) {
         setStep(2);
         const [an, mkt] = await Promise.all([
-          acc.an ? acc.an : soft(() => loadAnalysts(sym, fhKey, avKey), EMPTY_AN(), "Analisti"),
+          acc.an ? acc.an : soft(() => loadAnalysts(sym, "", avKey), EMPTY_AN(), "Analisti"),
           acc.mkt !== undefined ? acc.mkt : soft(() => loadMarket(sym, acc.quote.history), null, "Confronto con l'indice"),
         ]);
         acc.an = an; acc.mkt = mkt;
-        refreshAvUsage();
         setData({ ...acc });
       }
       setStep(3);
       if (!acc.newsRaw) acc.newsRaw = await soft(() => loadNewsRaw(sym), [], "Notizie");
       if (!acc.final || acc.final.failed) {
         const S = computeScores(acc, buildTech(acc.quote));
-        try {
-          const out = await callGeminiAPI(SYSTEM_PROMPT, buildUserPrompt(acc, S, labelOf(S.overall)), false);
-          const { news: nw, ...fin } = out;
-          acc.final = fin; acc.news = mergeNews(acc, nw);
-        } catch (e) {
-          acc.final = { failed: true };
+        if (!S.readiness.ready) {
+          acc.final = { failed: true, reason: S.readiness.reasons.join("; ") };
           acc.news = mergeNews(acc, null);
-          w.push("Commento e notizie: Gemini non disponibile (" + e.message.slice(0, 120) + ")"); setWarns([...w]);
+          w.push("Giudizio sospeso: qualità o copertura dei dati insufficiente.");
+          setWarns([...w]);
+        } else {
+          try {
+            const out = await callGeminiAPI(SYSTEM_PROMPT, buildUserPrompt(acc, S, labelOf(S.overall)), false);
+            const { news: nw, ...fin } = out;
+            acc.final = fin; acc.news = mergeNews(acc, nw);
+          } catch (e) {
+            acc.final = { failed: true };
+            acc.news = mergeNews(acc, null);
+            w.push("Commento e notizie: Gemini non disponibile (" + e.message.slice(0, 120) + ")"); setWarns([...w]);
+          }
         }
         setData({ ...acc });
       }
@@ -399,7 +387,8 @@ export default function AnalizzatoreAzionario() {
   async function doPrint() {
     if (!S || !q) return;
     try {
-      await printReport({ data, tech, S, label: labelOf(S.overall), warns });
+      const reportData = S.readiness?.ready ? data : { ...data, final: { failed: true } };
+      await printReport({ data: reportData, tech, S, label: labelOf(S.overall), warns });
     } catch (e) {
       const m = String(e.message || e);
       setWarns((x) => [...x, /not implemented|UNIMPLEMENTED/i.test(m) ? "Stampa non disponibile in questa versione dell'app: installa l'ultimo APK." : "Stampa non riuscita: " + m.slice(0, 120)]);
@@ -412,7 +401,7 @@ export default function AnalizzatoreAzionario() {
   const up = (x) => x != null && x >= 0;
 
   const Card = ({ title, children, meta }) => (
-    <section className={`rounded-xl border p-4 ${th.card}`}>
+    <section className={`app-card rounded-xl border p-4 ${th.card}`}>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h2 className="font-semibold text-base">{title}</h2>
         {meta}
@@ -425,6 +414,7 @@ export default function AnalizzatoreAzionario() {
     return (
       <div className={`flex flex-wrap items-center gap-1.5 text-xs ${th.mute}`}>
         <Clock size={12} /> {d || "n.d."} · {src || "fonte n.d."}
+        {String(src || "").includes("Yahoo Finance") && <span className="app-source-badge px-1.5 py-0.5 rounded font-medium">Feed non ufficiale</span>}
         {stale && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 font-medium flex items-center gap-1"><AlertTriangle size={11} />Dato non aggiornato</span>}
       </div>
     );
@@ -457,47 +447,60 @@ export default function AnalizzatoreAzionario() {
     }
   }
   const trend = p != null && s50 != null && s200 != null ? (p > s50 && s50 > s200 ? ["Rialzista", "text-emerald-500"] : p < s50 && s50 < s200 ? ["Ribassista", "text-red-500"] : ["Laterale / incerto", "text-amber-500"]) : ["n.d.", ""];
-  const radar = S ? Object.keys(WEIGHTS).map((k) => ({ k, v: S.scores[k] ?? 0 })) : [];
+  const radar = S ? Object.keys(WEIGHTS).filter((k) => S.scores[k] != null).map((k) => ({ k, v: S.scores[k] })) : [];
   const label = S ? labelOf(S.overall) : null;
   const pctRatings = a?.ratings || null;
   const valMetrics = (v?.metrics || []).filter((m) => num(m.v) != null || num(m.sector) != null);
 
   const cfColor = (n) => (n == null || isNaN(n) ? "" : n > 0 ? "text-emerald-500" : n < 0 ? "text-red-500" : "");
 
+  if (showV2) return <V2Console dark={dark} onBack={() => setShowV2(false)} analysisData={data} analysisScore={S} />;
+
   return (
-    <div className={`min-h-screen ${th.bg} ${dark ? "theme-dark" : "theme-light"}`}>
-      <div className="max-w-5xl mx-auto p-3 sm:p-5 space-y-4">
-        <div className="flex items-center justify-between gap-2">
-          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2"><TrendingUp className="text-emerald-500" />Analisi Finanziaria</h1>
-          <div className="flex gap-2">
-            <button onClick={() => setShowKey(!showKey)} className={`p-2 rounded-lg border ${th.card}`} aria-label="Chiave API"><Key size={16} /></button>
-            <button onClick={() => { const nd = !dark; setDark(nd); setThemeFixed(true); try { localStorage.setItem("theme", nd ? "dark" : "light"); } catch (e) {} }} className={`p-2 rounded-lg border ${th.card}`} aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
+    <div className={`app-shell min-h-screen ${th.bg} ${dark ? "theme-dark" : "theme-light"}`}>
+      <div className="app-main-container max-w-6xl mx-auto p-3 sm:p-6 space-y-5">
+        <header className="app-topbar">
+          <div className="app-brand">
+            <img src="/icon.svg" alt="Analizzatore Azionario" className="app-brand-icon" />
+            <div className="min-w-0">
+              <div className="app-kicker">PERSONAL INVESTMENT INTELLIGENCE</div>
+              <h1 className="app-brand-title">Analizzatore <span>Azionario</span></h1>
+              <p className="app-brand-subtitle">Analisi quantitativa, rischio e qualità dei dati in un’unica console.</p>
+            </div>
           </div>
-        </div>
+          <div className="app-actions">
+            <button onClick={() => setShowV2(true)} className="app-action-button app-workspace-button" aria-label="Apri workspace 2.0"><TrendingUp size={16} /><span>Workspace 2.0</span></button>
+            <button onClick={() => setShowKey(!showKey)} className="app-action-button" aria-label="Impostazioni fonti dati"><Key size={16} /></button>
+            <button onClick={() => { const nd = !dark; setDark(nd); setThemeFixed(true); try { localStorage.setItem("theme", nd ? "dark" : "light"); } catch (e) {} }} className="app-action-button" aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
+          </div>
+        </header>
+        {!q && (
+          <section className="app-hero">
+            <div className="app-hero-copy">
+              <div className="app-hero-eyebrow"><span className="app-live-dot" /> IL TUO CENTRO DI ANALISI DEGLI INVESTIMENTI</div>
+              <h2>Investi con metodo.<br /><span>Decidi con dati.</span></h2>
+              <p>Valutazioni fondamentali e tecniche, contesto macroeconomico e controllo del rischio. Nessun segnale viene mostrato quando i dati non superano i controlli di qualità.</p>
+              <div className="app-hero-tags"><span>Fonti gratuite</span><span>Fondamentali</span><span>Analisi tecnica</span><span>Fair Value</span><span>Risk management</span></div>
+            </div>
+            <div className="app-hero-art" aria-hidden="true">
+              <div className="app-hero-orbit orbit-one" /><div className="app-hero-orbit orbit-two" />
+              <img src="/icon.svg" alt="" />
+              <div className="app-hero-caption"><b>DISCIPLINA</b><span>Prima i dati, poi le decisioni</span></div>
+            </div>
+          </section>
+        )}
         {showKey && (
           <div className={`rounded-xl border p-3 text-sm space-y-2 ${th.card}`}>
             <div className="font-medium">Chiave API Gemini</div>
-            <div className={`text-xs ${th.mute}`}>Salvata solo su questo dispositivo. Creala gratis su aistudio.google.com/apikey</div>
+            <div className={`text-xs ${th.mute}`}>Salvata solo su questo dispositivo. Usa un progetto Google AI Studio senza fatturazione collegata: l’app usa solo gemini-3.5-flash-lite e non attiva Search grounding.</div>
             <input type="password" value={keyVal} onChange={(e) => setKeyVal(e.target.value)} placeholder="AIza…" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
-            <div className="font-medium pt-1">Chiave Finnhub (facoltativa)</div>
-            <div className={`text-xs ${th.mute}`}>Per rating, target price e peer dei titoli USA. Gratis su finnhub.io/register</div>
-            <input type="password" value={fhVal} onChange={(e) => setFhVal(e.target.value)} placeholder="Finnhub API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="font-medium pt-1">Chiave Alpha Vantage (facoltativa)</div>
             <div className={`text-xs ${th.mute}`}>Aggiunge target price e rating per i titoli USA (25 richieste al giorno). Gratis su alphavantage.co/support/#api-key</div>
             <input type="password" value={avVal} onChange={(e) => setAvVal(e.target.value)} placeholder="Alpha Vantage API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
-            <div className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs ${th.card}`}>
-              <span className={th.mute}>Consumo Alpha Vantage oggi</span>
-              <span className="font-semibold tabular-nums">{avUsage}/20 richieste</span>
-            </div>
-            <div className={`h-1.5 rounded-full overflow-hidden ${dark ? "bg-slate-800" : "bg-slate-200"}`}>
-              <div className={`h-full ${avUsage >= 20 ? "bg-red-500" : avUsage >= 15 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${Math.min(100, avUsage / 20 * 100)}%` }} />
-            </div>
-            <button type="button" onClick={refreshAvUsage} className={`text-xs underline ${th.mute}`}>Aggiorna contatore</button>
-            <div className="font-medium pt-1">Modello</div>
-            <input type="text" value={modelVal} onChange={(e) => setModelVal(e.target.value)} className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
+            <div className={`text-xs ${th.mute}`}>Piano gratuito: 25 richieste al giorno. L’app usa Alpha Vantage solo come integrazione facoltativa; le serie sono giornaliere, non realtime.</div>
             <div className="flex gap-2">
               <button disabled={testing} onClick={testKey} className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>Testa chiave</button>
-              <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); localStorage.setItem("gemini_model", modelVal.trim() || "gemini-3.5-flash-lite"); localStorage.setItem("finnhub_key", fhVal.trim()); localStorage.setItem("av_key", avVal.trim()); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium">Salva</button>
+              <button onClick={() => { try { localStorage.setItem("gemini_api_key", keyVal.trim()); localStorage.removeItem("gemini_model"); localStorage.removeItem("finnhub_key"); localStorage.setItem("av_key", avVal.trim()); } catch (e) {} setShowKey(false); setErr(null); }} className="flex-1 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium">Salva</button>
             </div>
             <button disabled={diagBusy} onClick={runDiag} className={`w-full px-3 py-2 rounded-lg border text-sm font-medium ${th.card}`}>{diagBusy ? "Test dati in corso…" : "Testa fonti dati"}</button>
             {diag && (
@@ -506,18 +509,11 @@ export default function AnalizzatoreAzionario() {
               </div>
             )}
             {testMsg && <div className={`text-xs break-words ${th.mute}`}>{testMsg}</div>}
-            {models.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {models.map((m) => (
-                  <button key={m} onClick={() => setModelVal(m)} className={`px-2 py-1 rounded-full border text-xs ${m === modelVal ? "bg-emerald-700 text-white border-emerald-700" : th.card}`}>{m}</button>
-                ))}
-              </div>
-            )}
           </div>
         )}
 
-        <div className="relative">
-          <div className="flex gap-2">
+        <div className="app-search-panel relative">
+          <div className="app-search-row flex gap-2">
             <input 
               value={input} 
               onChange={(e) => { setInput(e.target.value); setShowSuggestions(true); }} 
@@ -529,9 +525,9 @@ export default function AnalizzatoreAzionario() {
                 }
               }} 
               placeholder="Sigla o nome (es. AAPL, ENI.MI, Ferrari…)" 
-              className={`flex-1 min-w-0 px-3 py-2 rounded-lg border text-sm ${th.inp}`} 
+              className={`app-search-input flex-1 min-w-0 px-3 py-2 rounded-lg border text-sm ${th.inp}`} 
             />
-            <button onClick={() => { setShowSuggestions(false); run(); }} disabled={busy || !input.trim()} className="px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"><Search size={16} />Analizza</button>
+            <button onClick={() => { setShowSuggestions(false); run(); }} disabled={busy || !input.trim()} className="app-search-button px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"><Search size={16} />Analizza</button>
           </div>
           
           {showSuggestions && filteredSuggestions.length > 0 && (
@@ -554,6 +550,12 @@ export default function AnalizzatoreAzionario() {
           )}
         </div>
 
+        {!q && (
+          <div className="app-quick-picks flex flex-wrap items-center gap-2">
+            <span className="app-quick-label">Titoli rapidi</span>
+            {POPULAR_TICKERS.slice(0, 8).map((item) => <button type="button" key={item.ticker} onClick={() => { setInput(item.ticker); run(item.ticker); }} className="app-ticker-chip"><b>{item.ticker}</b><span>{item.name}</span></button>)}
+          </div>
+        )}
         {hist.length > 0 && (
           <div className="flex flex-wrap gap-1.5 items-center text-xs">
             <span className={th.mute}>Recenti:</span>
@@ -754,7 +756,7 @@ export default function AnalizzatoreAzionario() {
                 )}
               </div>
             ) : (
-              <div className={`text-xs mb-1 ${th.mute}`}>Consenso degli analisti (target price e rating) non disponibile per questo titolo: le fonti gratuite lo coprono solo per i titoli USA e con la chiave Finnhub o Alpha Vantage. Il punteggio si basa sulla forza relativa.</div>
+              <div className={`text-xs mb-1 ${th.mute}`}>Consenso degli analisti (target price e rating) non disponibile per questo titolo: la copertura gratuita è limitata e dipende dai dati restituiti da Yahoo Finance o, per alcuni titoli USA, da Alpha Vantage. Il punteggio si basa sulla forza relativa.</div>
             )}
             {rsData.length > 0 && (
               <div className="mt-3">
@@ -798,7 +800,8 @@ export default function AnalizzatoreAzionario() {
                 <div className="text-sm space-y-1">
                   {Object.entries(WEIGHTS).map(([k, w]) => (<div key={k} className="flex justify-between border-b py-1" style={{ borderColor: th.grid }}><span>{k} <span className={th.mute}>(peso {Math.round(w * 100)}%)</span></span><b>{S.scores[k] != null ? nf(S.scores[k], 0) : "n.d."}</b></div>))}
                   <div className="flex justify-between pt-1 text-base"><span>Punteggio complessivo</span><b>{S.overall != null ? nf(S.overall, 0) + "/100" : "n.d."}</b></div>
-                  <div className={`text-xs ${th.mute}`}>Media ponderata sui soli punteggi disponibili (pesi rinormalizzati). Affidabilità analisi: {S.rel}%</div>
+                  <div className={`text-xs ${th.mute}`}>Media ponderata sui soli punteggi disponibili. Affidabilità analisi: {S.rel}%</div>
+                  {!S.readiness.ready && <div role="alert" className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs"><b>Segnale sospeso — dati insufficienti.</b><ul className="list-disc pl-4 mt-1">{S.readiness.reasons.map((reason,i)=><li key={i}>{reason}</li>)}</ul></div>}
                 </div>
               </div>
             </Card>
@@ -808,7 +811,7 @@ export default function AnalizzatoreAzionario() {
                 <span className={`px-4 py-2 rounded-lg text-white font-bold text-lg ${LABEL_COLOR[label]}`}>{label}</span>
                 <div className="text-sm"><div>Confidenza: <b>{S.rel >= 75 ? "Alta" : S.rel >= 50 ? "Media" : "Bassa"}</b> ({S.rel}%)</div><div className={th.mute}>Orizzonte: {fi?.horizon || "n.d."}</div></div>
               </div>
-              {fi && !fi.failed ? (
+              {S.readiness.ready && fi && !fi.failed ? (
                 <>
                   <p className="text-sm leading-relaxed">{fi.motivation}</p>
                   <div className="grid sm:grid-cols-2 gap-3 mt-3 text-sm">
