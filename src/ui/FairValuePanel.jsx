@@ -7,7 +7,9 @@ const money=(v,currency)=>{if(!Number.isFinite(v))return "n.d.";try{return curre
 
 export default function FairValuePanel({dark=false,analysisData=null}){
  const currency=analysisData?.quote?.currency||"";
- const latestFcf=analysisData?.fin?.annual?.filter(x=>Number.isFinite(x.fcf)&&x.fcf>0).at(-1)?.fcf;
+ const latestAnnual=analysisData?.fin?.annual?.at(-1);
+ const latestFcf=Number.isFinite(latestAnnual?.fcf)&&latestAnnual.fcf>0?latestAnnual.fcf:null;
+ const latestFcfYear=Number.isFinite(latestAnnual?.fcf)?latestAnnual.y:null;
  const [fcfBase,setFcfBase]=useState(()=>Number.isFinite(latestFcf)?String(latestFcf):"");
  const [fcfGrowth,setFcfGrowth]=useState("5");
  const [wacc,setWacc]=useState("9");
@@ -37,7 +39,7 @@ export default function FairValuePanel({dark=false,analysisData=null}){
   }catch(err){setError(err.message);}
  };
  return <section className="rounded-xl border p-4 space-y-4">
-  <div><h2 className="text-lg font-semibold">Fair Value · DCF a scenari</h2><p className={`text-xs ${muted}`}>Modello trasparente con ipotesi modificabili. Il FCF e il debito netto possono essere precompilati dall’analisi del titolo; verifica periodo, valuta e unità. Le proiezioni a 5 anni derivano dalla crescita FCF da te scelta. Le azioni diluite vanno inserite manualmente in milioni.</p></div>
+  <div><h2 className="text-lg font-semibold">Fair Value · DCF a scenari</h2><p className={`text-xs ${muted}`}>Modello trasparente con ipotesi modificabili. FCF base {latestFcfYear?`precompilato dall’esercizio ${latestFcfYear}`:"da inserire manualmente se l’ultimo FCF non è positivo/disponibile"}; debito netto e prezzo provengono dall’analisi del titolo quando presenti. Verifica periodo, valuta e unità. Le proiezioni a 5 anni derivano dalla crescita FCF da te scelta. Le azioni diluite vanno inserite manualmente in milioni.</p></div>
   <form onSubmit={calculate} className="grid grid-cols-2 sm:grid-cols-3 gap-3">
    <label className="text-xs space-y-1">FCF ultimo esercizio (milioni)<input required type="number" min="0.000001" step="any" value={fcfBase} onChange={e=>setFcfBase(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
    <label className="text-xs space-y-1">Crescita FCF annua (%)<input required type="number" step="0.1" value={fcfGrowth} onChange={e=>setFcfGrowth(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
