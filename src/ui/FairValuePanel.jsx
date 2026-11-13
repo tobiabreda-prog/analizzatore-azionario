@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { valueScenarios } from "../modules/fair-value.js";
 
 const num=(v)=>v.trim()===""?null:Number(v);
@@ -7,18 +7,37 @@ const money=(v,currency)=>{if(!Number.isFinite(v))return "n.d.";try{return curre
 
 export default function FairValuePanel({dark=false,analysisData=null}){
  const currency=analysisData?.quote?.currency||"";
- const latestAnnual=analysisData?.fin?.annual?.at(-1);
- const latestFcf=Number.isFinite(latestAnnual?.fcf)&&latestAnnual.fcf>0?latestAnnual.fcf:null;
- const latestFcfYear=Number.isFinite(latestAnnual?.fcf)?latestAnnual.y:null;
- const [fcfBase,setFcfBase]=useState(()=>Number.isFinite(latestFcf)?String(latestFcf):"");
- const [fcfGrowth,setFcfGrowth]=useState("5");
- const [wacc,setWacc]=useState("9");
- const [growth,setGrowth]=useState("2.5");
- const [netDebt,setNetDebt]=useState(()=>Number.isFinite(analysisData?.fin?.balance?.netDebt)?String(analysisData.fin.balance.netDebt):"");
- const [shares,setShares]=useState("");
- const [price,setPrice]=useState(()=>Number.isFinite(analysisData?.quote?.price)?String(analysisData.quote.price):"");
+ const annual=useMemo(()=>[...(analysisData?.fin?.annual||[])].filter(x=>Number.isFinite(x?.y)).sort((a,b)=>a.y-b.y),[analysisData]);
+ const latestAnnual=annual.at(-1);
+ const latestFcfYear=latestAnnual?.y;
+ const recentFcfs=annual.slice(-3).map(x=>x.fcf).filter(x=>Number.isFinite(x)&&x>0);
+ const fcf=recentFcfs.length?[...recentFcfs].sort((a,b)=>a-b)[Math.floor(recentFcfs.length/2)]:null;
+ const history=annual.slice(-5).filter(x=>Number.isFinite(x.fcf)&&x.fcf>0);
+ const cagr=history.length>=3?Math.pow(history.at(-1).fcf/history[0].fcf,1/(history.length-1))-1:null;
+ const suggestedGrowth=cagr===null?5:Math.max(-5,Math.min(12,cagr*100));
+ const debt=analysisData?.fin?.balance?.netDebt;
+ const marketCap=analysisData?.quote?.marketCap??analysisData?.val?.marketCap;
+ const quotePrice=analysisData?.quote?.price;
+ const impliedShares=Number.isFinite(marketCap)&&marketCap>0&&Number.isFinite(quotePrice)&&quotePrice>0?marketCap/quotePrice/1e6:null;
+ const defaults={fcfBase:Number.isFinite(fcf)?String(fcf):"",fcfGrowth:String(Number(suggestedGrowth.toFixed(2))),wacc:"9",growth:"2.5",netDebt:Number.isFinite(debt)?String(debt):"",shares:Number.isFinite(impliedShares)?String(Number(impliedShares.toFixed(4))):"",price:Number.isFinite(quotePrice)&&quotePrice>0?String(quotePrice):""};
+ const [overrides,setOverrides]=useState({});
+ const fcfBase=overrides.fcfBase??defaults.fcfBase;
+ const fcfGrowth=overrides.fcfGrowth??defaults.fcfGrowth;
+ const wacc=overrides.wacc??defaults.wacc;
+ const growth=overrides.growth??defaults.growth;
+ const netDebt=overrides.netDebt??defaults.netDebt;
+ const shares=overrides.shares??defaults.shares;
+ const price=overrides.price??defaults.price;
+ const setFcfBase=v=>setOverrides(x=>({...x,fcfBase:v}));
+ const setFcfGrowth=v=>setOverrides(x=>({...x,fcfGrowth:v}));
+ const setWacc=v=>setOverrides(x=>({...x,wacc:v}));
+ const setGrowth=v=>setOverrides(x=>({...x,growth:v}));
+ const setNetDebt=v=>setOverrides(x=>({...x,netDebt:v}));
+ const setShares=v=>setOverrides(x=>({...x,shares:v}));
+ const setPrice=v=>setOverrides(x=>({...x,price:v}));
  const [result,setResult]=useState(null);
  const [error,setError]=useState("");
+ const reset=()=>{setOverrides({});setResult(null);setError("");};
  const muted=dark?"text-slate-400":"text-slate-500";
  const field=dark?"bg-slate-950 border-slate-700":"bg-white border-slate-300";
  const calculate=(e)=>{
@@ -39,7 +58,12 @@ export default function FairValuePanel({dark=false,analysisData=null}){
   }catch(err){setError(err.message);}
  };
  return <section className="rounded-xl border p-4 space-y-4">
-  <div><h2 className="text-lg font-semibold">Fair Value · DCF a scenari</h2><p className={`text-xs ${muted}`}>Modello trasparente con ipotesi modificabili. FCF base {latestFcfYear?`precompilato dall’esercizio ${latestFcfYear}`:"da inserire manualmente se l’ultimo FCF non è positivo/disponibile"}; debito netto e prezzo provengono dall’analisi del titolo quando presenti. Verifica periodo, valuta e unità. Le proiezioni a 5 anni derivano dalla crescita FCF da te scelta. Le azioni diluite vanno inserite manualmente in milioni.</p></div>
+  <div className="space-y-2"><h2 className="text-lg font-semibold">Fair Value · DCF a scenari</h2>
+   <p className={`text-xs ${muted}`}>Compilazione automatica dai bilanci caricati. FCF: mediana dei FCF positivi degli ultimi 3 esercizi; crescita: CAGR storico con almeno 3 osservazioni, limitato tra −5% e +12%, altrimenti 5%. WACC 9% e crescita terminale 2,5% sono ipotesi standard modificabili, non dati di mercato.</p>
+   <p className={`text-xs ${muted}`}>Ultimo esercizio: {latestFcfYear??"n.d."} · Fonte: {analysisData?.fin?.source||"non specificata"} · Debito netto: {Number.isFinite(debt)?"disponibile":"mancante"}.</p>
+   <p className="text-xs text-amber-600">Azioni: {Number.isFinite(impliedShares)?"stima da capitalizzazione ÷ prezzo (NON azioni diluite certificate); verificare con il bilancio":"dato non disponibile: inserire il numero verificato"}. I dati mancanti non vengono inventati. Importi finanziari in milioni, capitalizzazione in unità intere, stessa valuta.</p>
+   <button type="button" onClick={reset} className="rounded-lg border px-3 py-2 text-xs">Ripristina valori suggeriti</button>
+  </div>
   <form onSubmit={calculate} className="grid grid-cols-2 sm:grid-cols-3 gap-3">
    <label className="text-xs space-y-1">FCF ultimo esercizio (milioni)<input required type="number" min="0.000001" step="any" value={fcfBase} onChange={e=>setFcfBase(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
    <label className="text-xs space-y-1">Crescita FCF annua (%)<input required type="number" step="0.1" value={fcfGrowth} onChange={e=>setFcfGrowth(e.target.value)} className={`w-full rounded-lg border p-2 bg-transparent text-sm ${field}`}/></label>
