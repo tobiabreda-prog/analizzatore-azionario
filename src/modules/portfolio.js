@@ -1,5 +1,5 @@
 const finite=(v)=>typeof v==="number"&&Number.isFinite(v);
-const validDate=(v)=>typeof v==="string"&&/^\\d{4}-\\d{2}-\\d{2}$/.test(v)&&!Number.isNaN(new Date(v+"T00:00:00Z").getTime())&&new Date(v+"T00:00:00Z").toISOString().slice(0,10)===v;
+const validDate=(v)=>typeof v==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(new Date(v+"T00:00:00Z").getTime())&&new Date(v+"T00:00:00Z").toISOString().slice(0,10)===v;
 export function normalizeTrade(t) {
   if(!t||!t.id||!t.symbol||!["BUY","SELL"].includes(t.side)||!finite(t.quantity)||t.quantity<=0||!finite(t.price)||t.price<=0||!t.currency||!validDate(t.date)) throw new Error("Movimento non valido: verificare ID, titolo, lato, quantità, prezzo, valuta e data");
   const fees=finite(t.fees)?t.fees:0;
