@@ -1,15 +1,16 @@
 const BASE="https://www.alphavantage.co/query";
 const usageKey=(date=new Date())=>"aa2_av_usage_"+date.toISOString().slice(0,10);
-export function getAlphaVantageUsage(storage=globalThis.localStorage,date=new Date()){
-  try{const n=Number(storage?.getItem(usageKey(date))??0);return Number.isFinite(n)&&n>=0?n:0;}catch{return 0;}
+function resolveStorage(storage){try{return storage??globalThis.localStorage??null;}catch{return null;}}
+export function getAlphaVantageUsage(storage,date=new Date()){
+  try{const store=resolveStorage(storage);const n=Number(store?.getItem(usageKey(date))??0);return Number.isFinite(n)&&n>=0?n:0;}catch{return 0;}
 }
-export async function loadAlphaVantageDaily({symbol,apiKey,fetchImpl=fetch,storage=globalThis.localStorage,maxRequestsPerDay=25}){
+export async function loadAlphaVantageDaily({symbol,apiKey,fetchImpl=fetch,storage,maxRequestsPerDay=25}){
   if(!apiKey)throw new Error("Chiave API Alpha Vantage obbligatoria");
   if(!/^[A-Za-z0-9.^_-]{1,24}$/.test(symbol??""))throw new Error("Simbolo non valido");
-  let used=getAlphaVantageUsage(storage);
+  const store=resolveStorage(storage),used=getAlphaVantageUsage(store);
   if(used>=maxRequestsPerDay)throw new Error("Quota giornaliera gratuita Alpha Vantage esaurita");
   const url=new URL(BASE);url.search=new URLSearchParams({function:"TIME_SERIES_DAILY",symbol,outputsize:"compact",apikey:apiKey});
-  try{storage?.setItem(usageKey(),String(used+1));}catch{/* storage opzionale: il rate limit resta best effort */}
+  try{store?.setItem(usageKey(),String(used+1));}catch{/* contatore locale best effort */}
   const response=await fetchImpl(url);
   if(!response.ok)throw new Error("Alpha Vantage HTTP "+response.status);
   const json=await response.json();
