@@ -18,7 +18,7 @@ const today=()=>new Date().toISOString().slice(0,10);
 const money=(v,c="EUR")=>Number.isFinite(v)?new Intl.NumberFormat("it-IT",{style:"currency",currency:c,maximumFractionDigits:2}).format(v):"n.d.";
 const initial=()=>({trades:[],earnings:[],dividends:[]});
 
-export default function V2Console({dark=false,onBack=()=>{},analysisData=null}){
+export default function V2Console({dark=false,onBack=()=>{},analysisData=null,analysisScore=null}){
  const [data,setData]=useState(initial);
  const [tab,setTab]=useState("portfolio");
  const [error,setError]=useState("");
