@@ -21,6 +21,25 @@ describe("Fineco transaction costs",()=>{
     expect(result.totalCommission).toBe(25.9);
     expect(result.totalTransactionTax).toBeGreaterThan(0);
   });
+  it("charges the Italian non-frequent trading fee on both executions and reports totals",()=>{
+    const result=runLongOnlyBacktest({
+      bars,
+      signals:[{date:"2026-01-01",position:1},{date:"2026-01-02",position:0}],
+      initialCapital:6000,fixedFee:19,feeBps:0,buyTaxBps:0,slippageBps:0
+    });
+    expect(result.trades[0].commission).toBe(19);
+    expect(result.trades[1].commission).toBe(19);
+    expect(result.totalCommission).toBe(38);
+    expect(result.totalTransactionTax).toBe(0);
+  });
+  it("accepts a gross investment exactly at the shared 5,000 minimum plus costs",()=>{
+    const result=runLongOnlyBacktest({
+      bars,
+      signals:[{date:"2026-01-01",position:1}],
+      initialCapital:5029,fixedFee:19,buyTaxBps:20,slippageBps:0
+    });
+    expect(result.trades[0].grossNotional).toBeCloseTo(5000,8);
+  });
   it("rejects a buy below the 5,000 minimum notional",()=>{
     expect(()=>runLongOnlyBacktest({
       bars,signals:[{date:"2026-01-01",position:1}],
