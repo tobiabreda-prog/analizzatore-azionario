@@ -6,11 +6,12 @@ COME OTTENERE L'APK (senza installare nulla sul PC)
    Se non parte: Actions > Build APK > Run workflow.
 4. A fine build apri l'esecuzione e scarica l'artefatto "analizzatore-azionario-apk": dentro c'e' app-debug.apk.
 5. Copia l'APK sul telefono e installalo (consenti "installa da origini sconosciute").
-6. Nell'app tocca l'icona della chiave e inserisci la tua chiave API Gemini (gratis su aistudio.google.com/apikey).
+6. Nell'app tocca l'icona della chiave e inserisci una chiave Gemini da Google AI Studio. Usa un progetto SENZA fatturazione collegata: l'app usa solo gemini-3.5-flash-lite e non attiva Search grounding.
+7. Alpha Vantage è facoltativo: la chiave gratuita consente fino a 25 richieste/giorno; la cache locale evita chiamate ripetute. FRED richiede una chiave API gratuita; ECB non richiede chiave. Yahoo Finance non richiede chiave ma usa endpoint non ufficiali.
 
 In alternativa, con Android Studio + JDK 17:  npm install && npm run build && npx cap add android && npx cap sync android
 poi Build > Build APK(s) in Android Studio.
 
 TEST: npm install && npm test  (la build dell'APK esegue i test e si ferma se falliscono).
 STRUTTURA: src/scoring.js (punteggi, etichetta, livelli), src/fundamentals.js, src/analysts.js,
-src/providers/ (yahoo, finnhub, alpha), src/lib/ (utilita', indicatori, formati), tests/.
+src/providers/ (Alpha Vantage, FRED, ECB, SEC adapter; Yahoo Finance in src/data.js), src/lib/ (utilita', indicatori, formati), tests/.
