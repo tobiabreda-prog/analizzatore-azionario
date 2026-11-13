@@ -1,8 +1,7 @@
 const BASE="https://www.alphavantage.co/query";
-const DAY=new Date().toISOString().slice(0,10);
-const KEY="aa2_av_usage_"+DAY;
-export function getAlphaVantageUsage(storage=globalThis.localStorage){
-  try{return Number(storage?.getItem(KEY)??0);}catch{return 0;}
+const usageKey=(date=new Date())=>"aa2_av_usage_"+date.toISOString().slice(0,10);
+export function getAlphaVantageUsage(storage=globalThis.localStorage,date=new Date()){
+  try{return Number(storage?.getItem(usageKey(date))??0);}catch{return 0;}
 }
 export async function loadAlphaVantageDaily({symbol,apiKey,fetchImpl=fetch,storage=globalThis.localStorage,maxRequestsPerDay=25}){
   if(!apiKey)throw new Error("Chiave API Alpha Vantage obbligatoria");
@@ -10,7 +9,7 @@ export async function loadAlphaVantageDaily({symbol,apiKey,fetchImpl=fetch,stora
   let used=getAlphaVantageUsage(storage);
   if(used>=maxRequestsPerDay)throw new Error("Quota giornaliera gratuita Alpha Vantage esaurita");
   const url=new URL(BASE);url.search=new URLSearchParams({function:"TIME_SERIES_DAILY",symbol,outputsize:"compact",apikey:apiKey});
-  try{storage?.setItem(KEY,String(used+1));}catch{/* storage opzionale: il rate limit resta best effort */}
+  try{storage?.setItem(usageKey(),String(used+1));}catch{/* storage opzionale: il rate limit resta best effort */}
   const response=await fetchImpl(url);
   if(!response.ok)throw new Error("Alpha Vantage HTTP "+response.status);
   const json=await response.json();
