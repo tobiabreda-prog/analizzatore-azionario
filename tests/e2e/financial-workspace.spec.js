@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 
 test("workspace opens and calculates a scenario DCF", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Analisi Finanziaria" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Analizzatore Azionario" })).toBeVisible();
   await page.getByRole("button", { name: "Apri workspace 2.0" }).click();
   await expect(page.getByRole("heading", { name: "Console finanziaria" })).toBeVisible();
   await page.getByRole("button", { name: /Fair Value/ }).click();

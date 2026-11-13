@@ -1,7 +1,7 @@
 # Guida operativa — workspace 2.0
 
 ## Stato e avvertenze
-Il workspace 2.0 è una versione sperimentale. La scheda Mercati interroga Alpha Vantage per prezzi giornalieri; la scheda Macro interroga cinque serie FRED. Non sono dati realtime e non coprono tutti gli strumenti o le borse. La scheda Earnings & Dividendi mostra anche la prossima data utili, stime EPS/ricavi, storico sorprese e metriche dividendo provenienti dal feed Yahoo Finance dell'analisi principale; sono dati non ufficiali da verificare. Gli eventi inseriti manualmente restano non confermati. I risultati non sono raccomandazioni d'investimento.
+Il workspace 2.0 è in fase di validazione prima della release. La scheda Mercati interroga Alpha Vantage per prezzi giornalieri; la scheda Macro interroga dodici serie FRED e due serie ECB. Non sono dati realtime e non coprono tutti gli strumenti o le borse. La scheda Earnings & Dividendi mostra anche la prossima data utili, stime EPS/ricavi, storico sorprese e metriche dividendo provenienti dal feed Yahoo Finance dell'analisi principale; sono dati non ufficiali da verificare. Gli eventi inseriti manualmente restano non confermati. I risultati non sono raccomandazioni d'investimento.
 
 ## Avvio web
 1. Installare Node.js 22 LTS.
@@ -18,9 +18,9 @@ Il workflow GitHub Actions `Android debug APK` crea un progetto Capacitor Androi
 2. Aprire il workspace 2.0 e la scheda Mercati.
 3. Inserire ticker e chiave; premere Aggiorna storico.
 4. Il pannello mostra fino alle ultime dieci osservazioni giornaliere restituite.
-5. Il contatore locale limita le richieste gratuite a 25 al giorno per questo browser. Il contatore locale non è un limite condiviso fra dispositivi o browser.
+5. Il contatore locale limita le richieste gratuite a 25 al giorno e viene condiviso tra le funzioni Alpha Vantage di questa app sullo stesso browser/dispositivo. Non può coordinare altri browser, dispositivi o applicazioni che usano la stessa chiave.
 
-La chiave resta nello stato temporaneo della schermata, ma la richiesta al provider la trasmette nell'URL HTTPS. Non è un segreto protetto contro ispezione del traffico locale. Non distribuire una chiave personale dentro un'app pubblica. Verificare piano, copertura, ritardo e diritti di utilizzo per il mercato scelto.
+La chiave resta nello stato temporaneo della schermata, ma la richiesta al provider la trasmette nell'URL HTTPS. Non è un segreto protetto contro ispezione del traffico locale. Il codice usa solo endpoint del piano gratuito e applica cache/contatore; non attiva endpoint realtime o premium. Non distribuire una chiave personale dentro un'app pubblica. Verificare piano, copertura, ritardo e diritti di utilizzo per il mercato scelto.
 
 ## Indicatori macro FRED
 1. Richiedere una chiave personale su https://fred.stlouisfed.org/docs/api/api_key.html.
@@ -63,11 +63,15 @@ Il P&L realizzato usa il costo medio ponderato, non il metodo fiscale FIFO e non
 - Importa backup sostituisce il contenuto corrente del workspace dopo i controlli di formato.
 - Conservare il backup in un luogo sicuro; i dati locali possono essere cancellati rimuovendo dati del browser o dell'app.
 
-## Fonti e limiti architetturali
+## Fonti, costi e limiti architetturali
+- Politica di costo: nessun endpoint premium, nessuna ricerca AI a pagamento e nessun fallback automatico verso piani a pagamento. Alpha Vantage, FRED ed ECB vengono usati solo con funzioni gratuite; le chiavi API sono personali e non vengono fornite dall'app.
+- Gemini: solo modello `gemini-3.5-flash-lite`, senza Search grounding. Usare un progetto Google AI Studio senza fatturazione collegata; se le quote gratuite terminano, la richiesta deve fallire e non essere fatturata. La chiave è conservata in localStorage lato client, non in un vault sicuro.
+- Yahoo Finance: feed senza chiave e senza costo API, ma endpoint non ufficiali, senza SLA e con copertura/ritardo non garantiti; ogni dato va verificato prima dell'uso operativo.
+- Finnhub è stato rimosso perché non aggiungeva valore sufficiente rispetto alle fonti gratuite rimaste e alcuni endpoint target price non sono disponibili nel piano gratuito.
 - SEC EDGAR: filing e dati XBRL, non quotazioni. Per chiamate server-side occorre identificare correttamente l'applicazione nel User-Agent e rispettare le regole SEC. Il browser non può impostare liberamente l'header User-Agent richiesto: usare un proxy server controllato per integrare questo adapter in produzione.
 - ECB Data Portal: serie statistiche ufficiali tramite SDMX/CSV.
 - FRED: serie macro USA e serie OECD di rendimenti governativi; API key e diritti della singola serie. La serie Italia-Germania è mensile e non equivale allo spread BTP-Bund di mercato.
-- Alpha Vantage: servizio prezzi e fondamentali con limiti diversi per endpoint e piano.
+- Alpha Vantage: piano gratuito con 25 richieste al giorno; l'app usa storico daily e OVERVIEW come fallback, con cache e quota condivisa localmente. Nessun endpoint premium viene chiamato.
 
 ## Cosa non è ancora incluso
 Feed globale completo e licenziato; prezzi realtime; copertura verificata di tutti i mercati; earnings/dividendi ufficiali multi-mercato; SEC XBRL collegato alla UI; HICP europeo e spread BTP-Bund giornaliero; FX e corporate actions; backtest point-in-time completo; fiscalità italiana; autenticazione cloud e sincronizzazione multi-dispositivo; test su dispositivo reale; APK firmato per distribuzione.

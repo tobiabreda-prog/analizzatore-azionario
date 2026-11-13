@@ -1,6 +1,6 @@
 # Analizzatore Azionario 2.0 — stato di completamento
 
-Aggiornato: 13 novembre 2026. Branch di lavoro: `feature/analizzatore-2-completion`.
+Aggiornato: 13 novembre 2026. Branch di lavoro: `feature/zero-cost-premium-dashboard`.
 
 ## Funzioni integrate nel branch
 - Analisi legacy di prezzo, indicatori tecnici, bilanci, multipli, analisti e calendario societario.
@@ -18,8 +18,11 @@ Aggiornato: 13 novembre 2026. Branch di lavoro: `feature/analizzatore-2-completi
 - ECB Data Portal: usato per la serie giornaliera USD per EUR e per il tasso sui depositi BCE; chiavi SDMX verificate sulla documentazione ufficiale.
 - FRED: API gratuita con chiave personale; dodici serie macro, incluse le serie OECD sui rendimenti governativi decennali di Italia e Germania. Frequenza e ritardi sono quelli ufficiali delle serie.
 - Alpha Vantage: API key personale gratuita e quota giornaliera; prezzi daily, non realtime. Il backtest usa il profilo commissionale Fineco per operatività non frequente indicato dall'utente: 12,95 USD per eseguito USA o 19,00 EUR per eseguito Italia, con personalizzazione. Il capitale iniziale e il controvalore minimo per nuovo acquisto sono 5.000 EUR/USD; il capitale deve coprire anche le commissioni. Verificare la copertura del ticker e le condizioni del piano.
-- Yahoo Finance: usato dall'analisi legacy per prezzi, fondamentali, multipli, news ed eventi. Endpoint non ufficiale, soggetto a modifiche/blocchi; non è un feed realtime né una fonte con licenza verificata per uso/distribuzione.
-- Nessun provider a pagamento richiesto dal codice; alcune fonti richiedono registrazione e chiavi gratuite. La disponibilità gratuita può cambiare.
+- Yahoo Finance: usato per prezzi, fondamentali, multipli, news ed eventi. Endpoint non ufficiale, soggetto a modifiche/blocchi; non è un feed realtime né una fonte con licenza API verificata per uso/distribuzione.
+- Politica no-cost: nessun endpoint premium, nessun piano API a pagamento, nessun modello AI selezionabile e nessun Search grounding. Gemini è bloccato su `gemini-3.5-flash-lite` (free tier); l'utente deve usare un progetto AI Studio senza fatturazione collegata per impedire addebiti anche dopo il superamento delle quote gratuite.
+- Finnhub rimosso: non era necessario per il flusso e alcuni endpoint target-price non sono affidabili nel piano gratuito.
+- Alpha Vantage: 25 richieste/giorno pubblicate; contatore locale condiviso tra storico daily/backtest e fallback OVERVIEW, cache per simbolo/giorno per evitare chiamate duplicate. La quota effettiva resta condivisa a livello chiave tra dispositivi e altri utilizzi esterni.
+- Nessun provider a pagamento richiesto dal codice; alcune fonti richiedono registrazione e chiavi gratuite. La disponibilità gratuita e i limiti possono cambiare.
 - Il portafoglio usa costo medio ponderato, registra commissioni e imposte separatamente e richiede almeno 5.000 EUR/USD per i nuovi acquisti inseriti manualmente. Non implementa lotti fiscali, FIFO/LIFO o fiscalità italiana.
 - Tobin Tax: selezione manuale opzionale nel backtest (20 bps mercato regolamentato/MTF; 40 bps fuori mercato dal 1° gennaio 2026). In via generale riguarda gli acquisti di azioni emesse da società residenti in Italia; per le società quotate è rilevante la capitalizzazione media di novembre dell'anno precedente (soglia 500 milioni EUR), oltre alle ulteriori regole per società non quotate, strumenti ed esenzioni. ETF/ETC e obbligazioni non sono soggetti alla Tobin Tax azionaria. L'imposta si calcola sul saldo netto giornaliero per singolo strumento: il backtest la applica al singolo acquisto come stima semplificata, senza netting né verifica automatica dell'emittente. Nel registro portafoglio va inserito l'importo effettivamente addebitato da Fineco. Fonti: legge 30 dicembre 2025 n. 199, art. 1 commi 29-31 (Gazzetta Ufficiale); pagina informativa Fineco Tobin Tax.
 - Il backtest non è point-in-time completo e non corregge survivorship bias; non include dividendi reinvestiti, split/corporate actions, FX, imposte, benchmark, costi di broker personalizzati o walk-forward.
@@ -36,4 +39,4 @@ Aggiornato: 13 novembre 2026. Branch di lavoro: `feature/analizzatore-2-completi
 5. Backtest point-in-time e total-return prima di usare risultati per decisioni operative.
 6. Firma APK release con keystore gestito dall'utente; non committare keystore o password nel repository.
 
-Questa build è un incremento di sviluppo verificabile, non una certificazione di accuratezza dei dati o di idoneità a fornire consulenza finanziaria.
+L'interfaccia principale è stata ridisegnata con layout responsive, ricerca rapida, branding salvadanaio e workspace coordinato. Questa build resta un incremento di sviluppo verificabile, non una certificazione di accuratezza dei dati o di idoneità a fornire consulenza finanziaria.
