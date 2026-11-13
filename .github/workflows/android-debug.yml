@@ -33,6 +33,8 @@ jobs:
         run: npx cap add android
       - name: Sync Capacitor
         run: npx cap sync android
+      - name: Generate custom Android launcher icons
+        run: node scripts/generate-android-icons.mjs
       - name: Register native Android report printer
         run: |
           MAIN=$(find android/app/src/main/java -name MainActivity.java | head -n 1)
