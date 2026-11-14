@@ -1,6 +1,7 @@
 // Report stampabile: HTML autonomo (A4, colori adatti alla carta) + apertura della finestra di stampa.
 // Su Android usa il plugin nativo "PrintReport" (aggiunto in fase di build); sul web ricade su window.print().
 import { registerPlugin, Capacitor } from "@capacitor/core";
+import { earningsSurprise, formatEstimatePeriod } from "./modules/earnings-dividends.js";
 
 const PrintReport = registerPlugin("PrintReport");
 
@@ -79,11 +80,11 @@ export function buildReportHtml({ data, tech, S, label, warns = [] }) {
 
   const ev = data.events || {};
   const earn = ev.earnings || {}, div = ev.dividends || {};
-  const earnRows = [["Prossima pubblicazione risultati", earn.nextDate || "n.d."], ["Periodo stima", earn.estimatePeriod || "n.d."], ["EPS atteso", nf(earn.epsEstimate)], ["Ricavi attesi (mln)", mf(earn.revenueEstimate)]];
-  const earnHistory = table(["Periodo", "EPS effettivo", "EPS stimato", "Sorpr. %"], (earn.history || []).slice().reverse().map((x) => [x.quarter || "n.d.", nf(x.epsActual), nf(x.epsEstimate), pf(x.surprisePct)]));
-  const divRows = [["Dividendo annuo per azione", isNum(div.annualRate) ? nf(div.annualRate) + " " + (q.currency || "") : "n.d."], ["Dividend yield", isNum(div.yield) ? nf(div.yield, 2) + "%" : "n.d."], ["Payout ratio", isNum(div.payoutRatio) ? nf(div.payoutRatio, 1) + "%" : "n.d."], ["Data ex-dividendo", div.exDividendDate || "n.d."], ["Yield medio 5 anni", isNum(div.fiveYearAvgYield) ? nf(div.fiveYearAvgYield, 2) + "%" : "n.d."]];
+  const earnRows = [["Prossima pubblicazione risultati", earn.nextDate ? earn.nextDate + (earn.nextDateStatus === "stima_yahoo" ? " (stima Yahoo)" : " (Yahoo)") : "Data non disponibile"], ["Periodo stima", formatEstimatePeriod(earn.estimatePeriod, earn.estimatePeriodEnd)], ["EPS atteso", nf(earn.epsEstimate)], ["Ricavi attesi (mln)", mf(earn.revenueEstimate)]];
+  const earnHistory = table(["Periodo", "EPS effettivo", "EPS stimato", "Sorpr. %"], (earn.history || []).slice().reverse().map((x) => [x.quarter || "n.d.", nf(x.epsActual), nf(x.epsEstimate), pf(earningsSurprise(x.epsActual,x.epsEstimate)?.percent)]));
+  const divRows = [["Dividendo annuo per azione", isNum(div.annualRate) ? nf(div.annualRate) + " " + (q.currency || "") : "n.d."], ["Dividend yield", isNum(div.yield) ? nf(div.yield, 2) + "%" : "n.d."], ["Payout ratio", isNum(div.payoutRatio) ? nf(div.payoutRatio, 1) + "%" : "n.d."], ["Data ex-dividendo", div.exDividendDate || "n.d."], ["Yield medio 5 anni", isNum(div.fiveYearAvgYield) ? nf(div.fiveYearAvgYield, 2) + "%" : (div.fiveYearAvgYieldReason || "Dato non disponibile")]];
   const divHistory = table(["Data stacco", "Importo per azione"], (div.history || []).slice(-8).reverse().map((x) => [x.date, nf(x.amount) + " " + (q.currency || "")]));
-  const eventsHtml = ev && (ev.earnings || ev.dividends) ? '<section><h2>Calendario utili e dividendi</h2><div class="two"><div><h3>Earnings Intelligence</h3>' + table(["Indicatore", "Valore"], earnRows) + earnHistory + '</div><div><h3>Dividend Intelligence</h3>' + table(["Indicatore", "Valore"], divRows) + divHistory + '</div></div><p class="mute">Fonte: ' + esc(ev.source || "n.d.") + ', dati al ' + esc(ev.asOf || "n.d.") + '. Copertura e stime possono variare. Dividend yield non garantito. La data di pagamento non è esposta in modo uniforme. Questi dati non modificano il punteggio.</p></section>' : "";
+  const eventsHtml = ev && (ev.earnings || ev.dividends) ? '<section><h2>Calendario utili e dividendi</h2><div class="two"><div><h3>Earnings Intelligence</h3>' + table(["Indicatore", "Valore"], earnRows) + earnHistory + '</div><div><h3>Dividend Intelligence</h3>' + table(["Indicatore", "Valore"], divRows) + divHistory + '</div></div><p class="mute">Fonte: ' + esc(ev.source || "n.d.") + ', dati al ' + esc(ev.asOf || "n.d.") + '. Copertura e stime possono variare; le date Yahoo possono essere indicative. La sorpresa EPS è ricalcolata dagli EPS mostrati, non dal campo percentuale del provider. Dividend yield non garantito; media quinquennale mostrata soltanto se fornita dalla fonte. Questi dati non modificano il punteggio.</p></section>' : "";
   const mk = data.mkt;
   const rsRows = mk && mk.stock ? [["3 mesi", "r13"], ["6 mesi", "r26"], ["12 mesi", "r52"]].filter(([, k]) => isNum(mk.stock[k])).map(([lab, k]) => {
     const ix = mk.index && isNum(mk.index[k]) ? mk.index[k] : null;

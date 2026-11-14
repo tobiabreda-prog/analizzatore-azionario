@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { ComposedChart, LineChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell } from "recharts";
 import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, loadCorporateEvents, loadPeerValuation, mergeQuoteMarketCap, loadMarketCapFallback, diagnostics } from "./data.js";
 import { printReport } from "./report.js";
+import { earningsSurprise, formatEstimatePeriod } from "./modules/earnings-dividends.js";
 import { assessAnalysisReadiness } from "./core/analysis-gate.js";
 import V2Console from "./ui/V2Console.jsx";
 import { getApiKey, saveApiKey } from "./services/api-settings.js";
@@ -740,14 +741,16 @@ export default function AnalizzatoreAzionario() {
               <div>
                 <div className="font-semibold text-sm mb-2">Calendario risultati</div>
                 <div className="grid grid-cols-2 gap-2 text-sm">
-                  <Stat k="Prossima trimestrale" v={data.events.earnings?.nextDate || "n.d."} />
-                  <Stat k="Periodo stima" v={data.events.earnings?.estimatePeriod || "n.d."} />
+                  <Stat k="Prossima trimestrale" v={data.events.earnings?.nextDate
+                    ? data.events.earnings.nextDate + (data.events.earnings.nextDateStatus === "stima_yahoo" ? " (stima Yahoo)" : " (Yahoo)")
+                    : "Data non disponibile"} />
+                  <Stat k="Periodo stima" v={formatEstimatePeriod(data.events.earnings?.estimatePeriod,data.events.earnings?.estimatePeriodEnd)} />
                   <Stat k="EPS atteso" v={nf(data.events.earnings?.epsEstimate)} />
                   <Stat k="Ricavi attesi" v={cf(data.events.earnings?.revenueEstimate)} />
                 </div>
                 {(data.events.earnings?.history || []).length > 0 && (
                   <div className="overflow-x-auto mt-2"><table className="w-full text-xs"><thead><tr className={th.mute}><th className="text-left p-1">Periodo</th><th className="text-right p-1">EPS effettivo</th><th className="text-right p-1">Stima</th><th className="text-right p-1">Sorpr. %</th></tr></thead><tbody>
-                    {data.events.earnings.history.slice().reverse().map((x,i) => <tr key={i} className={`border-t ${th.card}`}><td className="p-1">{x.quarter || "n.d."}</td><td className="text-right p-1">{nf(x.epsActual)}</td><td className="text-right p-1">{nf(x.epsEstimate)}</td><td className="text-right p-1">{pf(x.surprisePct)}</td></tr>)}
+                    {data.events.earnings.history.slice().reverse().map((x,i) => <tr key={i} className={`border-t ${th.card}`}><td className="p-1">{x.quarter || "n.d."}</td><td className="text-right p-1">{nf(x.epsActual)}</td><td className="text-right p-1">{nf(x.epsEstimate)}</td><td className="text-right p-1">{pf(earningsSurprise(x.epsActual,x.epsEstimate)?.percent)}</td></tr>)}
                   </tbody></table></div>
                 )}
               </div>
@@ -758,7 +761,9 @@ export default function AnalizzatoreAzionario() {
                   <Stat k="Dividend yield" v={data.events.dividends?.yield != null ? nf(data.events.dividends.yield, 2) + "%" : "n.d."} />
                   <Stat k="Payout ratio" v={data.events.dividends?.payoutRatio != null ? nf(data.events.dividends.payoutRatio, 1) + "%" : "n.d."} />
                   <Stat k="Ex-dividend date" v={data.events.dividends?.exDividendDate || "n.d."} />
-                  <Stat k="Yield medio 5 anni" v={data.events.dividends?.fiveYearAvgYield != null ? nf(data.events.dividends.fiveYearAvgYield, 2) + "%" : "n.d."} />
+                  <Stat k="Yield medio 5 anni" v={data.events.dividends?.fiveYearAvgYield != null
+                    ? nf(data.events.dividends.fiveYearAvgYield, 2) + "%"
+                    : data.events.dividends?.fiveYearAvgYieldReason || "Dato non disponibile"} />
                 </div>
                 {(data.events.dividends?.history || []).length > 0 && (
                   <div className="overflow-x-auto mt-2"><table className="w-full text-xs"><thead><tr className={th.mute}><th className="text-left p-1">Data stacco</th><th className="text-right p-1">Importo / azione</th></tr></thead><tbody>
@@ -767,7 +772,7 @@ export default function AnalizzatoreAzionario() {
                 )}
               </div>
             </div>
-            <p className={`text-xs mt-3 ${th.mute}`}>Date, stime e dividendi dipendono dalla copertura Yahoo Finance e possono essere assenti o soggetti a revisione. Il dividend yield è indicativo, non garantito; la data di pagamento non è esposta da questa fonte in modo uniforme. I dati non modificano il punteggio.</p>
+            <p className={`text-xs mt-3 ${th.mute}`}>Date e stime di Yahoo possono mancare o essere indicative, non necessariamente annunciate dall’emittente. La sorpresa EPS è ricalcolata come (effettivo − stima) / |stima| × 100, usando gli EPS mostrati; controllare la metodologia degli EPS. Il rendimento medio a 5 anni viene mostrato solo se fornito dalla fonte. La data di pagamento non è disponibile in modo uniforme. I dati non modificano il punteggio.</p>
           </Card>
         )}
 
