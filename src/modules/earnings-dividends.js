@@ -26,3 +26,38 @@ export function dividendMetrics({ annualDividend, price, earningsPerShare, freeC
 export function buildCorporateCalendar({ earnings = [], dividends = [] } = {}) {
   return [...earnings.map((e) => ({ type: "earnings", date: e.date, symbol: e.symbol, source: e.source, status: e.status, payload: e })), ...dividends.map((d) => ({ type: "dividend", date: d.exDate, symbol: d.symbol, source: d.source, status: d.status, payload: d }))].sort((a,b) => a.date.localeCompare(b.date));
 }
+
+
+/** Translate Yahoo earningsTrend period codes, without guessing fiscal quarters. */
+export function formatEstimatePeriod(period, endDate = null) {
+  const labels = {
+    "0q": "Trimestre corrente", "+1q": "Trimestre successivo",
+    "0y": "Anno fiscale corrente", "+1y": "Anno fiscale successivo"
+  };
+  const label = labels[period];
+  if (!label) return typeof period === "string" && /^(Trimestre|Anno fiscale)/.test(period) ? period : "n.d.";
+  const date = typeof endDate === "string" ? endDate.slice(0,10) : null;
+  return dateOnly(date) ? label + " · fine " + date : label;
+}
+
+/**
+ * A Yahoo 5-year average dividend yield is already a percentage (e.g. 0.45
+ * means 0.45%, unlike the decimal dividendYield field).
+ * If missing, explain why, but never silently invent a historical average.
+ */
+export function fiveYearYieldInfo({ providedPercent = null, dividends = [], historyStart = null, asOf = null } = {}) {
+  if (finite(providedPercent) && providedPercent >= 0 && providedPercent <= 100) {
+    return { value: Math.round(providedPercent * 100) / 100, reason: "Yahoo Finance" };
+  }
+  const end = dateOnly(asOf) ? Date.parse(asOf) : Date.now();
+  const start = dateOnly(historyStart) ? Date.parse(historyStart) : NaN;
+  const validDividends = (Array.isArray(dividends) ? dividends : []).filter(d => dateOnly(d?.date) && finite(d?.amount) && d.amount > 0)
+    .sort((a,b) => a.date.localeCompare(b.date));
+  // Only classify a short dividend track record when the price chart spans
+  // almost 5 years and shows a gap of >1 year before the first cash dividend.
+  if (validDividends.length && Number.isFinite(start) && end - start >= 4.6*365.25*864e5 &&
+      Date.parse(validDividends[0].date) - start > 365.25*864e5) {
+    return { value: null, reason: "Storico dividendi inferiore a 5 anni" };
+  }
+  return { value: null, reason: "Dato non disponibile dalla fonte" };
+}
