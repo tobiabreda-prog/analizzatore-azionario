@@ -234,11 +234,19 @@ const median = (a) => { const v = a.filter((x) => x != null && x > 0).sort((x, y
 const isUS = (sym) => !/[.:]/.test(sym);
 
 // Storico: mediana dei valori trimestrali degli ultimi 5 anni, ricavata dalle serie gia' scaricate (nessuna chiamata in piu').
-function histMedian(series) {
-  const lim = Date.now() - 5 * 366 * 864e5;
-  const pts = (series || []).filter((e) => Date.parse(e.d) >= lim && e.v > 0);
-  if (pts.length < 4) return null;
-  return { v: median(pts.map((e) => e.v)), span: (Date.parse(pts[pts.length - 1].d) - Date.parse(pts[0].d)) / (365 * 864e5) };
+export function histMedian(series, now=Date.now()) {
+  const lim=now-5*365.25*864e5;
+  const byDate=new Map();
+  for(const e of Array.isArray(series)?series:[]){
+    const ts=Date.parse(e?.d);
+    if(Number.isFinite(ts)&&ts>=lim&&ts<=now+864e5&&num(e.v)!=null&&e.v>0)byDate.set(e.d,e.v);
+  }
+  const pts=[...byDate].sort((a,b)=>a[0].localeCompare(b[0]));
+  if(pts.length<8)return null;
+  const first=Date.parse(pts[0][0]),last=Date.parse(pts.at(-1)[0]);
+  const span=(last-first)/(365.25*864e5);
+  if(span<4.4||(now-last)>210*864e5)return null;
+  return {v:median(pts.map(p=>p[1])),span,observations:pts.length,asOf:pts.at(-1)[0]};
 }
 
 // Titoli simili per il confronto di settore: Yahoo Finance (fonte non ufficiale).
@@ -555,6 +563,42 @@ const BENCH = {
   ".T": ["^N225", "Nikkei 225"], ".HK": ["^HSI", "Hang Seng"], ".TO": ["^GSPTSE", "S&P/TSX"],
 };
 const benchFor = (symbol) => { const i = symbol.lastIndexOf("."); return BENCH[i >= 0 ? symbol.slice(i).toUpperCase() : ""] || null; };
+// Build relative returns exclusively from the SAME calendar weeks. The
+// Yahoo weekly chart may timestamp a week on Monday while stock bars close Friday.
+const mondayKey=(date)=>{
+  const t=Date.parse(String(date)+"T00:00:00Z");
+  if(!Number.isFinite(t))return null;
+  const d=new Date(t);
+  d.setUTCDate(d.getUTCDate()-(d.getUTCDay()+6)%7);
+  return d.toISOString().slice(0,10);
+};
+export function pairedWeeklyReturns(stockHistory,indexHistory) {
+  const toMap=(rows)=>{
+    const out=new Map();
+    for(const row of Array.isArray(rows)?rows:[]){
+      const date=Array.isArray(row)?row[0]:row?.date;
+      const value=Array.isArray(row)?row[1]:row?.close;
+      const key=mondayKey(date);
+      if(key&&num(value)!=null&&value>0)out.set(key,value);
+    }
+    return out;
+  };
+  const stockMap=toMap(stockHistory),indexMap=toMap(indexHistory);
+  const shared=[...stockMap.keys()].filter(k=>indexMap.has(k)).sort();
+  const latest=shared.at(-1);
+  if(!latest||latest!==[...stockMap.keys()].sort().at(-1)||latest!==[...indexMap.keys()].sort().at(-1))return null;
+  const output={stock:{r13:null,r26:null,r52:null},index:{r13:null,r26:null,r52:null}};
+  let available=0;
+  for(const weeks of [13,26,52]){
+    const past=new Date(Date.parse(latest+"T00:00:00Z")-weeks*7*864e5).toISOString().slice(0,10);
+    if(!stockMap.has(past)||!indexMap.has(past))continue;
+    const key="r"+weeks;
+    output.stock[key]=round((stockMap.get(latest)/stockMap.get(past)-1)*100,1);
+    output.index[key]=round((indexMap.get(latest)/indexMap.get(past)-1)*100,1);
+    available++;
+  }
+  return available?output:null;
+}
 // rendimenti percentuali a 13/26/52 settimane da una serie di chiusure settimanali
 export function weeklyReturns(c) {
   const n = c.length, r = (k) => (n > k && c[n - 1 - k] > 0 ? round((c[n - 1] / c[n - 1 - k] - 1) * 100, 1) : null);
@@ -563,7 +607,7 @@ export function weeklyReturns(c) {
 
 export async function loadMarket(symbol, history) {
   const closes = (history || []).map((h) => h[1]).filter(num);
-  const stock = weeklyReturns(closes);
+  let stock = weeklyReturns(closes);
   const last52 = closes.slice(-52);
   const lo = last52.length ? Math.min(...last52) : null, hi = last52.length ? Math.max(...last52) : null;
   const price = closes[closes.length - 1];
@@ -573,9 +617,16 @@ export async function loadMarket(symbol, history) {
   if (b) {
     try {
       const r = await yget(`/v8/finance/chart/${encodeURIComponent(b[0])}`, { range: "2y", interval: "1wk", includePrePost: "false" });
-      const q = r.data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
-      const c = q.filter(num);
-      if (r.status === 200 && c.length > 14) index = weeklyReturns(c);
+      const result=r.data?.chart?.result?.[0];
+      const timestamps=result?.timestamp||[];
+      const prices=result?.indicators?.quote?.[0]?.close||[];
+      const benchmark=timestamps.map((ts,i)=>[isoDate(ts,result?.meta?.gmtoffset||0),num(prices[i])])
+        .filter(row=>row[1]!=null&&row[1]>0);
+      const paired=pairedWeeklyReturns(history,benchmark);
+      if(r.status===200&&paired){
+        index=paired.index;
+        stock=paired.stock;
+      }
     } catch (e) { /* indice non disponibile */ }
   }
   return { bench: b && index ? { symbol: b[0], name: b[1] } : null, stock, index, pos52 };
