@@ -1,5 +1,5 @@
-name: Safe auto-merge and Android APK
-# Runs only after the read-only Quality checks workflow completes.
+name: Safe auto-merge
+# Runs after Quality checks and may merge approved PRs; NEVER builds an APK.
 # NEVER checks out or executes pull-request code with a write token.
 on:
   workflow_run:
@@ -9,7 +9,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  actions: write
 
 concurrency:
   group: safe-auto-merge-main
@@ -93,12 +92,3 @@ jobs:
           else
             echo "Merge blocked by GitHub; leaving PR for manual review."
           fi
-
-      - name: Build Android debug APK from main
-        if: steps.merge.outputs.merged == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          # workflow_dispatch is an allowed follow-on trigger with GITHUB_TOKEN.
-          gh workflow run android-debug.yml --ref main
-          echo "Android debug APK build dispatched on main."
