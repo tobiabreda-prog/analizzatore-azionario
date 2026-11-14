@@ -1,4 +1,4 @@
-// Model discovery shared by report commentary and WACC research.
+// Model discovery for optional report commentary. Only an explicitly approved Lite model can be invoked.
 // A successful models.list response is reused in memory, never persisted with the API key.
 const TTL=60*60*1000;
 let activeKey=null,cachedAt=0,cachedModels=null,inflight=null;
@@ -27,4 +27,14 @@ export async function listGeminiModels(key) {
  inflight=request;
  try {return await request;}
  finally{if(inflight===request)inflight=null;}
+}
+
+
+// Fail closed. A listed model is not proof that a paid project has zero charges.
+export const APPROVED_GEMINI_REPORT_MODEL = "models/gemini-3.5-flash-lite";
+export function approvedReportModels(models) {
+  return (Array.isArray(models) ? models : []).filter(m =>
+    m?.name === APPROVED_GEMINI_REPORT_MODEL &&
+    (m.supportedGenerationMethods || []).includes("generateContent")
+  );
 }
