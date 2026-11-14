@@ -102,7 +102,7 @@ export function buildReportHtml({ data, tech, S, label, warns = [] }) {
 <table class="levels"><tbody><tr><td>Ingresso</td><td>Stop</td><td>Target</td></tr><tr><th>${esc(fi.entry || "n.d.")}</th><th>${esc(fi.stop || "n.d.")}</th><th>${esc(fi.target || "n.d.")}</th></tr></tbody></table>`
     : `<p class="mute">Commento del modello non disponibile.</p>`;
 
-  const tr = [["Prezzo", `${nf(q.price)} ${q.currency || ""}`], ["Variazione", pf(q.changePct)], ["Capitalizzazione", cf(q.marketCap)], ["SMA 50 / SMA 200", `${nf(q.sma50)} / ${nf(q.sma200)}`], ["RSI (14)", nf(q.rsi14, 1)], ["Supporti", (q.support || []).map((x) => nf(x)).join(" · ") || "n.d."], ["Resistenze", (q.resistance || []).map((x) => nf(x)).join(" · ") || "n.d."]];
+  const tr = [["Prezzo", `${nf(q.price)} ${q.currency || ""}`], ["Variazione", pf(q.changePct)], ["Capitalizzazione", isNum(q.marketCap) ? cf(q.marketCap) + (q.marketCapCurrency ? " " + q.marketCapCurrency : "") : "n.d."], ["Data/Fonte capitalizzazione", isNum(q.marketCap) ? ([q.marketCapAsOf,q.marketCapSource].filter(Boolean).join(" · ") || "n.d.") : "n.d."], ["SMA 50 / SMA 200", `${nf(q.sma50)} / ${nf(q.sma200)}`], ["RSI (14)", nf(q.rsi14, 1)], ["Supporti", (q.support || []).map((x) => nf(x)).join(" · ") || "n.d."], ["Resistenze", (q.resistance || []).map((x) => nf(x)).join(" · ") || "n.d."]];
 
   return `<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Analisi ${esc(q.ticker || "")}</title>
 <style>

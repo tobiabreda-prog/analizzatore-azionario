@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { ComposedChart, LineChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer, CartesianGrid, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell } from "recharts";
-import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, loadCorporateEvents, loadPeerValuation, diagnostics } from "./data.js";
+import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, loadCorporateEvents, loadPeerValuation, mergeQuoteMarketCap, loadMarketCapFallback, diagnostics } from "./data.js";
 import { printReport } from "./report.js";
 import { assessAnalysisReadiness } from "./core/analysis-gate.js";
 import V2Console from "./ui/V2Console.jsx";
@@ -329,6 +329,11 @@ export default function AnalizzatoreAzionario() {
       if(!active())return;
       if(!quote||!quote.ticker)throw new Error("Quotazione non disponibile per "+target+". Controlla rete e ticker.");
       const sym=quote.ticker;
+      const enrichMarketCap=(valuation)=>{
+        if(!active()||!acc.quote)return;
+        const merged=mergeQuoteMarketCap(acc.quote,valuation);
+        if(merged!==acc.quote)put("quote",merged,sym);
+      };
       if(sym!==target){
         const canonical=readAnalysisSnapshot(sym);
         for(const key of Object.keys(canonical.data))if(key!=="quote"&&!acc[key])acc[key]=canonical.data[key];
@@ -340,18 +345,32 @@ export default function AnalizzatoreAzionario() {
         const cachedVal=!force?readAnalysisSection(sym,"val"):null;
         if(cachedFin&&cachedVal){
           acc.fin=cachedFin.value;acc.val=cachedVal.value;
-          clearNotice("fin");clearNotice("val");publish();return;
+          clearNotice("fin");clearNotice("val");publish();
+          enrichMarketCap(cachedVal.value);return;
         }
         try {
           const {fin,val}=await loadFundamentals(sym,{includePeers:false});
           if(!active())return;
           put("fin",fin,sym);put("val",val,sym);
+          enrichMarketCap(val);
         } catch(e) {
           if(!active())return;
           warn("fin",(acc.fin&&acc.val?"Bilanci da cache precedente: ":"Bilanci non disponibili: ")+String(e.message||e).slice(0,100));
         }
       };
       const core=fundamental();
+      // Optional source: Yahoo's quote endpoint (may require a crumb and fail).
+      // Only attempt when chart and cached/new fundamentals contain no usable cap.
+      const capFallback=(async()=>{
+        await core;
+        if(!active()||!acc.quote||Number.isFinite(acc.quote.marketCap)&&acc.quote.marketCap>0||acc.quote.instrumentType==="ETF")return;
+        try{
+          const found=await loadMarketCapFallback(sym,acc.quote.currency,acc.quote.asOf);
+          if(active()&&found&&!(Number.isFinite(acc.quote.marketCap)&&acc.quote.marketCap>0)){
+            put("quote",{...acc.quote,...found},sym);
+          }
+        }catch(e){ /* Optional endpoint: never prevent the report. */ }
+      })();
       // Optional requests start concurrently and update their own sections on completion.
       const extras=[
         section("events",()=>loadCorporateEvents(sym),sym),
@@ -381,7 +400,7 @@ export default function AnalizzatoreAzionario() {
       await core;
       if(!active())return;
       setStep(STEPS.length); // Report ready; optional data and Gemini continue separately.
-      await Promise.allSettled([...extras,peers]);
+      await Promise.allSettled([...extras,peers,capFallback]);
       if(!active()||!acc.fin||!acc.val)return;
       const S=computeScores(acc,buildTech(acc.quote));
       if(!S.readiness.ready){
@@ -647,7 +666,10 @@ export default function AnalizzatoreAzionario() {
                 </div>
               </div>
               <div className="flex gap-2 items-center">
-                <Stat k="Capitalizzazione" v={cf(q.marketCap)} />
+                <div className="space-y-1">
+                  <Stat k="Capitalizzazione" v={q.marketCap != null ? cf(q.marketCap)+(q.marketCapCurrency ? " "+q.marketCapCurrency : "") : "n.d."} />
+                  {q.marketCap != null&&<p className={`text-[10px] ${th.mute}`}>{q.marketCapSource || "Fonte non specificata"}{q.marketCapAsOf ? " · "+q.marketCapAsOf : ""}</p>}
+                </div>
                 <button onClick={() => run(cur, false, true)} disabled={busy} className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-1.5 disabled:opacity-50 ${th.card}`}><RefreshCw size={14} className={busy ? "animate-spin" : ""} />Aggiorna dati</button>
                 <button onClick={doPrint} disabled={busy || step !== STEPS.length} aria-label="Stampa report" className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-1.5 disabled:opacity-50 ${th.card}`}><Printer size={14} />Stampa report</button>
               </div>
