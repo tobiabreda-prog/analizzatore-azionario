@@ -1,6 +1,7 @@
 // Fonti gratuite: Yahoo Finance non ufficiale per la copertura multi-mercato; Alpha Vantage opzionale per dati analisti USA.
 // Gemini interpreta il report; la ricerca WACC opzionale usa grounding web, con verifica separata delle fonti.
 import { CapacitorHttp } from "@capacitor/core";
+import { earningsSurprise, fiveYearYieldInfo } from "./modules/earnings-dividends.js";
 
 const UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36";
 
@@ -458,43 +459,79 @@ export async function loadCorporateEvents(symbol) {
   const earnings = ce.earnings || {};
   const trend = root.earningsTrend?.trend || [];
   const current = trend.find((x) => x.period === "0q") || trend.find((x) => x.period === "+1q") || null;
-  const history = (root.earningsHistory?.history || []).slice(-8).map((x) => ({
-    quarter: x.quarter ? yahooRawDate(x.quarter) : null,
-    epsActual: raw(x.epsActual), epsEstimate: raw(x.epsEstimate),
-    surprisePct: raw(x.surprisePercent),
-  }));
+  const history = (root.earningsHistory?.history || []).slice(-8).map((x) => {
+    const actual = raw(x.epsActual), estimate = raw(x.epsEstimate);
+    return {
+      quarter: x.quarter ? yahooRawDate(x.quarter) : null,
+      epsActual: actual, epsEstimate: estimate,
+      // Yahoo surprisePercent can be expressed as a fraction; recompute from
+      // the same EPS values we display instead of assuming its unit.
+      surprisePct: earningsSurprise(actual,estimate)?.percent ?? null,
+    };
+  });
   const sd = root.summaryDetail || {};
   const ks = root.defaultKeyStatistics || {};
-  let dividendHistory = [];
+  let dividendHistory = [], priceHistoryStart = null;
   try {
     const ch = await yget(`/v8/finance/chart/${encodeURIComponent(symbol)}`, {
       range: "5y", interval: "1d", events: "div",
     });
-    const ev = ch.data?.chart?.result?.[0]?.events?.dividends || {};
+    const chart = ch.data?.chart?.result?.[0];
+    const firstTimestamp = chart?.timestamp?.[0];
+    priceHistoryStart = num(firstTimestamp) != null ? yahooRawDate(firstTimestamp) : null;
+    const ev = chart?.events?.dividends || {};
     dividendHistory = Object.values(ev).map((x) => ({
-      date: new Date(Number(x.date) * 1000).toISOString().slice(0, 10),
+      date: num(x.date) != null ? yahooRawDate(x.date) : null,
       amount: num(x.amount),
-    })).filter((x) => x.amount != null).sort((a, b) => a.date.localeCompare(b.date));
+    })).filter((x) => x.date && x.amount != null && x.amount >= 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
   } catch (e) { /* storico dividendi facoltativo */ }
-  const earningsDates = (earnings.earningsDate || []).map(yahooRawDate).filter(Boolean);
-  const nextEarnings = earningsDates.find((x) => x >= today()) || null;
+  const earningsDates = (earnings.earningsDate || []).map(yahooRawDate).filter(Boolean).sort();
+  let nextEarnings = earningsDates.find((x) => x >= today()) || null;
+  let nextDateStatus = nextEarnings ? (earnings.isEarningsDateEstimate === true ? "stima_yahoo" : "calendario_yahoo") : "non_disponibile";
+  // A missing calendarEvents date does not imply that the company has stopped
+  // reporting. Yahoo's quote endpoint may provide an INDICATIVE future window.
+  if (!nextEarnings) {
+    try {
+      const quoteResponse = await yget("/v7/finance/quote", {
+        symbols: symbol, crumb: c.crumb, formatted: "false", lang: "en-US", region: "US",
+      }, c.cookie ? { Cookie: c.cookie } : {});
+      const quoted = (quoteResponse.status === 200 ? quoteResponse.data?.quoteResponse?.result || [] : [])
+        .find(x => String(x.symbol || "").toUpperCase() === String(symbol).toUpperCase());
+      const timestamps = [quoted?.earningsTimestampStart, quoted?.earningsTimestamp, quoted?.earningsTimestampEnd]
+        .map(yahooRawDate).filter(x => x && x >= today()).sort();
+      const candidate = timestamps[0] || null;
+      // Reject suspicious calendar data too far into the future.
+      if (candidate && Date.parse(candidate) - Date.now() < 550*864e5) {
+        nextEarnings = candidate;
+        nextDateStatus = "stima_yahoo";
+      }
+    } catch (e) { /* fallback non ufficiale: la scheda resta utilizzabile */ }
+  }
   const epsEstimate = raw(current?.earningsEstimate?.avg);
   const revenueEstimate = raw(current?.revenueEstimate?.avg);
   const dividendRate = raw(sd.dividendRate) ?? raw(sd.trailingAnnualDividendRate);
   const dividendYield = raw(sd.dividendYield) ?? raw(sd.trailingAnnualDividendYield);
   const exDividendDate = yahooRawDate(sd.exDividendDate);
   const payoutRatio = raw(sd.payoutRatio);
+  const fiveYearInfo = fiveYearYieldInfo({
+    // Unlike dividendYield, Yahoo's fiveYearAvgDividendYield is in percentage points.
+    providedPercent: raw(sd.fiveYearAvgDividendYield),
+    dividends: dividendHistory, historyStart: priceHistoryStart, asOf: today(),
+  });
   return {
     earnings: {
-      nextDate: nextEarnings, dateWindow: earningsDates,
+      nextDate: nextEarnings, nextDateStatus, dateWindow: earningsDates,
       epsEstimate, revenueEstimate,
       estimatePeriod: current?.period || null,
+      estimatePeriodEnd: typeof current?.endDate === "string" ? current.endDate.slice(0,10) : null,
       history,
     },
     dividends: {
       annualRate: dividendRate, yield: dividendYield != null ? round(dividendYield * 100, 2) : null,
       payoutRatio: payoutRatio != null ? round(payoutRatio * 100, 1) : null,
-      exDividendDate, fiveYearAvgYield: raw(sd.fiveYearAvgDividendYield) != null ? round(raw(sd.fiveYearAvgDividendYield) * 100, 2) : null,
+      exDividendDate, fiveYearAvgYield: fiveYearInfo.value,
+      fiveYearAvgYieldReason: fiveYearInfo.reason,
       trailingEps: raw(ks.trailingEps), history: dividendHistory,
     },
     asOf: today(), source: "Yahoo Finance",
