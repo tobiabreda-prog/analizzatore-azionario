@@ -3,6 +3,7 @@ import { ArrowLeft, Download, Upload, AlertTriangle, CheckCircle2 } from "lucide
 import { parseInvestingPortfolio } from "../modules/investing-portfolio.js";
 import { buildPortfolioSnapshot } from "../modules/portfolio-snapshot.js";
 import { loadPortfolioSnapshot, savePortfolioSnapshot } from "../services/portfolio-store.js";
+import { readCsvFile } from "../services/csv-file.js";
 
 const finite = value => typeof value === "number" && Number.isFinite(value);
 const number = (value, decimals = 2) => finite(value)
@@ -58,7 +59,7 @@ function LotsTable({ rows, closed, muted, card }) {
   </tr>)}</tbody></table></div>;
 }
 
-export default function PortfolioConsole({ dark = false, onBack = () => {}, onSelectSymbol = () => {} }) {
+export default function PortfolioConsole({ dark = false, onBack = () => {}, onSelectSymbol = () => {}, initialFile = null, backLabel = "Analisi titolo" }) {
   const [saved, setSaved] = useState(null), [preview, setPreview] = useState(null);
   const [tab, setTab] = useState("summary"), [loaded, setLoaded] = useState(false), [busy, setBusy] = useState(false);
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
@@ -73,21 +74,25 @@ export default function PortfolioConsole({ dark = false, onBack = () => {}, onSe
     setLoaded(true);
     return () => { requestId.current++; };
   }, []);
-  const selectFile = async event => {
-    const file = event.target.files?.[0];
+  const prepareFile = async file => {
     if (!file) return;
     const id = ++requestId.current;
     setError("");setNotice("");setPreview(null);setBusy(true);
     try {
-      if (file.size > 5 * 1024 * 1024) throw new Error("Il CSV supera il limite di 5 MB.");
-      let sourceText;
-      try { sourceText = new TextDecoder("utf-8", { ignoreBOM: true, fatal: true }).decode(await file.arrayBuffer()); }
-      catch { throw new Error("Il file deve essere un CSV codificato in UTF-8."); }
+      const sourceText = await readCsvFile(file);
       const snapshot = parseInvestingPortfolio(sourceText, { fileName: file.name });
       const view = buildPortfolioSnapshot(snapshot);
       if (id === requestId.current) { setPreview({ snapshot, view });setTab("summary"); }
     } catch (err) { if (id === requestId.current) setError("Importazione non riuscita: " + err.message); }
-    finally { if (id === requestId.current) setBusy(false);event.target.value = ""; }
+    finally { if (id === requestId.current) setBusy(false); }
+  };
+  useEffect(() => {
+    if (initialFile) prepareFile(initialFile);
+  }, [initialFile]);
+  const selectFile = async event => {
+    const input = event.currentTarget;
+    await prepareFile(input.files?.[0]);
+    input.value = "";
   };
   const confirmImport = () => {
     if (!preview) return;
@@ -104,7 +109,7 @@ export default function PortfolioConsole({ dark = false, onBack = () => {}, onSe
   return <div className={`min-h-screen ${dark ? "bg-slate-950 text-slate-100 theme-dark" : "bg-slate-50 text-slate-900 theme-light"}`}>
     <div className="max-w-6xl mx-auto p-3 sm:p-6 space-y-5">
       <header className="flex flex-wrap justify-between items-center gap-3"><div><h1 className="text-2xl font-bold">Portafoglio</h1><p className={`text-sm ${muted}`}>Posizioni, lotti e storico importati da Investing.com</p></div>
-        <button type="button" onClick={onBack} className={`border rounded-lg px-3 py-2 flex items-center gap-2 ${card}`}><ArrowLeft size={16}/>Analisi titolo</button></header>
+        <button type="button" onClick={onBack} className={`border rounded-lg px-3 py-2 flex items-center gap-2 ${card}`}><ArrowLeft size={16}/>{backLabel}</button></header>
       <section className={`border rounded-xl p-4 space-y-3 ${card}`}><h2 className="font-semibold">Importa il portafoglio Investing.com</h2>
         <p className={`text-sm ${muted}`}>Carica l’esportazione CSV completa e controlla l’anteprima prima di salvare. Ogni importazione sostituisce la fotografia precedente, senza aggiungere di nuovo gli stessi lotti.</p>
         <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-white"><Upload size={16}/>{busy ? "Lettura in corso…" : "Seleziona CSV Investing.com"}

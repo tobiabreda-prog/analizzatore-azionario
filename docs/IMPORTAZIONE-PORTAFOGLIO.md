@@ -7,6 +7,8 @@
 3. Controlla l'anteprima e gli avvisi di riconciliazione.
 4. Premi **Conferma importazione**. Se un portafoglio è già salvato, il pulsante diventa **Conferma sostituzione**; **Annulla importazione** conserva la fotografia precedente.
 
+Puoi selezionare lo stesso export anche da **Watchlist → Ripristina CSV**: il formato Investing.com viene riconosciuto e si apre automaticamente l'anteprima del portafoglio completo, senza modificare i ticker della watchlist. Da questa anteprima il pulsante **Watchlist** riporta alla schermata di partenza. I backup con la sola colonna `symbol` continuano invece a ripristinare la watchlist.
+
 Il file è elaborato e conservato sul dispositivo, senza richieste a Investing.com o invio del portafoglio a Gemini. Il limite del file è 5 MB; lo spazio di salvataggio disponibile dipende dal browser o dal dispositivo. Un errore di lettura o salvataggio conserva il portafoglio precedentemente importato.
 
 ## Dati disponibili
