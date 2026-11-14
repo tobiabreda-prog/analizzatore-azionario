@@ -70,3 +70,19 @@ describe("investment readiness gate",()=>{
   });
 
 });
+
+
+describe("sector-specific investment score gate",()=>{
+ it("blocks financial services and property categories using generalist industrial metrics",()=>{
+  const input=fixture();
+  const blocked=assessAnalysisReadiness({...input,now,sector:"Financial Services",industry:"Banks - Diversified"});
+  expect(blocked.ready).toBe(false);
+  expect(blocked.reasons.join(" ")).toMatch(/generalista non applicabile/);
+  const property=assessAnalysisReadiness({...input,now,sector:"Real Estate",industry:"REIT - Industrial"});
+  expect(property.ready).toBe(false);
+  expect(property.reasons.join(" ")).toMatch(/settoriali validati/);
+ });
+ it("does not block a technology sector solely because it is not financial",()=>{
+  expect(assessAnalysisReadiness({...fixture(),now,sector:"Technology",industry:"Software - Infrastructure"}).ready).toBe(true);
+ });
+});
