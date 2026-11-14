@@ -101,6 +101,21 @@ jobs:
           }
           JAVA
           sed -i "s/__PKG__/$PKG/g" "$DIR/PrintReportPlugin.java" "$DIR/MainActivity.java"
+      - name: Restore permanent Android debug signing key
+        env:
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${ANDROID_DEBUG_KEYSTORE_BASE64:-}" ]]; then
+            echo "::error::Missing ANDROID_DEBUG_KEYSTORE_BASE64. Refusing to generate an APK signed with a new random key."
+            exit 1
+          fi
+          install -d -m 700 "$HOME/.android"
+          printf %s "$ANDROID_DEBUG_KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+          keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey > /dev/null
+          echo "Permanent Android signing key loaded and validated."
       - name: Assemble debug APK
         run: cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon
       - uses: actions/upload-artifact@v5
