@@ -87,7 +87,7 @@ export function buildAnnualMetrics(rows = []) {
         gm: revenue > 0 && num(row?.gp) != null ? (row.gp / revenue) * 100 : null,
         om: revenue > 0 && num(row?.op) != null ? (row.op / revenue) * 100 : null,
         nm: revenue > 0 && num(row?.ni) != null ? (row.ni / revenue) * 100 : null,
-        g: revenue > 0 && previousRevenue > 0 ? (revenue / previousRevenue - 1) * 100 : null
+        g: revenue > 0 && previousRevenue > 0 && row.y === sorted[index - 1]?.y + 1 ? (revenue / previousRevenue - 1) * 100 : null
       };
     });
 }
@@ -123,8 +123,8 @@ export function computeScores(D, tech) {
   const rs = num(q?.rsi14) ?? last?.rsi;
   const tS = q ? avg([p != null && s200 != null ? (p > s200 ? 100 : 0) : null, p != null && s50 != null ? (p > s50 ? 100 : 0) : null, rs != null ? clamp(100 - Math.abs(rs - 55) * 3) : null, last && num(last.hist) != null ? (last.hist > 0 ? 100 : 25) : null]) : null;
   const an = (f?.annual || []).slice().sort((x, y) => x.y - y.y), la = an[an.length - 1], fa = an[0], pa = an[an.length - 2];
-  const cagr = la && fa && an.length > 1 && fa.rev > 0 && la.rev > 0 ? (Math.pow(la.rev / fa.rev, 1 / (an.length - 1)) - 1) * 100 : null;
-  const epsG = la && pa && num(la.eps) != null && num(pa.eps) > 0 ? (la.eps / pa.eps - 1) * 100 : null;
+  const cagr = la && fa && Number.isInteger(la.y) && Number.isInteger(fa.y) && la.y > fa.y && num(fa.rev) > 0 && num(la.rev) >= 0 ? (Math.pow(la.rev / fa.rev, 1 / (la.y - fa.y)) - 1) * 100 : null;
+  const epsG = la && pa && la.y === pa.y + 1 && num(la.eps) != null && num(pa.eps) > 0 ? (la.eps / pa.eps - 1) * 100 : null;
   const gS = avg([sc(cagr, -5, 15), sc(epsG, -10, 20)]);
   const b = f?.balance || {};
   // Non trasformare NI/EBIT mancanti in margini pari a zero: zero è un dato, null è assenza.
@@ -177,8 +177,8 @@ const EMPTY_FIN = () => ({ annual: [], quarters: [], balance: {}, lastReportDate
 const EMPTY_VAL = () => ({ metrics: [], peers: [], asOf: TODAY(), source: "n.d." });
 const EMPTY_AN = () => ({ targetMean: null, targetMin: null, targetMax: null, ratings: { buy: 0, hold: 0, sell: 0 }, nAnalysts: 0, asOf: TODAY(), source: "n.d." });
 
-const SYSTEM_PROMPT = "Sei un analista finanziario prudente. Usa SOLO i dati forniti: i campi assenti non sono disponibili, non inventarli e segnala la mancanza. L'etichetta indicata è già decisa: motivala senza contraddirla. Scrivi in italiano. Rispondi solo con JSON valido.";
-const OUTPUT_SCHEMA = '{"horizon":"es. 6-12 mesi","motivation":"4-6 frasi con numeri dai dati","strengths":["max 12 parole","",""],"risks":["max 12 parole",""],"entry":"","stop":"","target":"","news":{"tone":"1 frase sul tono delle notizie","risks":["max 2 rischi emersi dalle notizie"],"items":[{"i":0,"t":"titolo tradotto in italiano","s":"pos|neu|neg"}]}}';
+const SYSTEM_PROMPT = "Sei un analista finanziario prudente. Usa SOLO i dati forniti: i campi assenti non sono disponibili, non inventarli e segnala la mancanza. L’etichetta indicata è già decisa: motivala senza contraddirla. Non suggerire livelli di ingresso, stop o target. Scrivi in italiano. Rispondi solo con JSON valido.";
+const OUTPUT_SCHEMA = '{"horizon":"es. 6-12 mesi","motivation":"4-6 frasi con numeri dai dati","strengths":["max 12 parole","",""],"risks":["max 12 parole",""],"news":{"tone":"1 frase sul tono delle notizie","risks":["max 2 rischi emersi dalle notizie"],"items":[{"i":0,"t":"titolo tradotto in italiano","s":"pos|neu|neg"}]}}';
 
 function buildUserPrompt(acc, S, label) {
   const q = acc.quote, f = acc.fin || {}, v = acc.val || {}, a = acc.an || {};
@@ -413,14 +413,17 @@ export default function AnalizzatoreAzionario() {
       const fingerprint=analysisFingerprint(acc);
       const saved=!force?readAnalysisSection(sym,"ai"):null;
       if(saved?.value?.fingerprint===fingerprint){
-        acc.final=saved.value.final;acc.news=saved.value.news;publish();return;
+        const {entry,stop,target,...cachedCommentary}=saved.value.final || {};
+        acc.final=cachedCommentary;acc.news=saved.value.news;publish();return;
       }
       setAiBusy(true);
       try {
         const out=await callGeminiAPI(SYSTEM_PROMPT,buildUserPrompt(acc,S,labelOf(S.overall)));
         if(!active())return;
         const {news:nw,...fin}=out;
-        acc.final=fin;acc.news=mergeNews(acc,nw);
+        // Unverified entry/stop/target values must never reach the report.
+        const {entry,stop,target,...commentary}=fin;
+        acc.final=commentary;acc.news=mergeNews(acc,nw);
         writeAnalysisSection(sym,"ai",{fingerprint,final:acc.final,news:acc.news});
         clearNotice("ai");publish();
       }catch(e){
@@ -876,7 +879,7 @@ export default function AnalizzatoreAzionario() {
                 <div className="text-sm space-y-1">
                   {Object.entries(WEIGHTS).map(([k, w]) => (<div key={k} className="flex justify-between border-b py-1" style={{ borderColor: th.grid }}><span>{k} <span className={th.mute}>(peso {Math.round(w * 100)}%)</span></span><b>{S.scores[k] != null ? nf(S.scores[k], 0) : "n.d."}</b></div>))}
                   <div className="flex justify-between pt-1 text-base"><span>Punteggio complessivo</span><b>{S.overall != null ? nf(S.overall, 0) + "/100" : "n.d."}</b></div>
-                  <div className={`text-xs ${th.mute}`}>Media ponderata sui soli punteggi disponibili. Affidabilità analisi: {S.rel}%</div>
+                  <div className={`text-xs ${th.mute}`}>Media ponderata sui soli punteggi disponibili. Copertura dati: {S.rel}%</div>
                   {!S.readiness.ready && <div role="alert" className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs"><b>Segnale sospeso — dati insufficienti.</b><ul className="list-disc pl-4 mt-1">{S.readiness.reasons.map((reason,i)=><li key={i}>{reason}</li>)}</ul></div>}
                 </div>
               </div>
@@ -885,7 +888,7 @@ export default function AnalizzatoreAzionario() {
             <Card title="Giudizio finale">
               <div className="flex flex-wrap items-center gap-3 mb-3">
                 <span className={`px-4 py-2 rounded-lg text-white font-bold text-lg ${LABEL_COLOR[label]}`}>{label}</span>
-                <div className="text-sm"><div>Confidenza: <b>{S.rel >= 75 ? "Alta" : S.rel >= 50 ? "Media" : "Bassa"}</b> ({S.rel}%)</div><div className={th.mute}>Orizzonte: {fi?.horizon || "n.d."}</div></div>
+                <div className="text-sm"><div>Copertura dati: <b>{S.rel >= 75 ? "Alta" : S.rel >= 50 ? "Media" : "Bassa"}</b> ({S.rel}%)</div><div className={th.mute}>Orizzonte: {fi?.horizon || "n.d."}</div></div>
               </div>
               {S.readiness.ready && fi && !fi.failed ? (
                 <>
@@ -894,7 +897,7 @@ export default function AnalizzatoreAzionario() {
                     <div className={`rounded-lg border p-3 ${th.card}`}><div className="font-medium text-emerald-500 mb-1 flex items-center gap-1"><CheckCircle2 size={14} />Punti di forza</div><ul className="list-disc pl-4 space-y-1">{(fi.strengths || []).map((x, i) => <li key={i}>{x}</li>)}</ul></div>
                     <div className={`rounded-lg border p-3 ${th.card}`}><div className="font-medium text-red-500 mb-1 flex items-center gap-1"><AlertTriangle size={14} />Rischi</div><ul className="list-disc pl-4 space-y-1">{(fi.risks || []).map((x, i) => <li key={i}>{x}</li>)}</ul></div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 mt-3 text-sm"><Stat k="Ingresso" v={fi.entry || "n.d."} c="text-blue-500" /><Stat k="Stop" v={fi.stop || "n.d."} c="text-red-500" /><Stat k="Target" v={fi.target || "n.d."} c="text-emerald-500" /></div>
+                  <p className={`text-xs mt-3 ${th.mute}`}>Livelli operativi di ingresso, stop e target non pubblicati: richiedono una metodologia numerica verificabile, non indicazioni generate dall’AI.</p>
                 </>
               ) : (
                 <div className="text-sm flex items-center gap-3"><span className={th.mute}>Motivazione non disponibile (errore API).</span><button onClick={() => run(cur, true)} className="px-3 py-1.5 rounded-lg bg-emerald-700 text-white">Riprova</button></div>
