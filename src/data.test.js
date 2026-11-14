@@ -1,8 +1,10 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { loadQuote, loadFundamentals, mergeQuoteMarketCap, loadMarketCapFallback, setHttp } from "./data.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { loadQuote, loadFundamentals, mergeQuoteMarketCap, loadMarketCapFallback, loadCorporateEvents, resetYahooSession, setHttp } from "./data.js";
 
 afterEach(() => {
   setHttp(async () => { throw new Error("HTTP mock non configurato"); });
+  resetYahooSession();
+  vi.useRealTimers();
 });
 
 describe("Yahoo daily quote normalization",()=>{
@@ -122,4 +124,54 @@ describe("Market capitalization provenance and fallbacks",()=>{
     setHttp(async()=>({status:200,data:{quoteResponse:{result:[{symbol:"TEST",marketCap:1e9,currency:"USD"}]}}}));
     await expect(loadMarketCapFallback("TEST","USD",asOf)).resolves.toBeNull();
   });
+});
+
+describe("GOOGL earnings and dividend intelligence",()=>{
+ const ts=date=>Date.parse(date+"T16:00:00Z")/1000;
+ const response=(opts={})=>async(url)=>{
+  if(url==="https://fc.yahoo.com")return {status:200,headers:{"set-cookie":"A1=test_cookie; Path=/;"},data:""};
+  if(url.includes("/v1/test/getcrumb"))return {status:200,data:"testingcrumb123",headers:{}};
+  if(url.includes("/v10/finance/quoteSummary/GOOGL"))return {status:200,data:{quoteSummary:{result:[{
+   calendarEvents:{earnings:{earningsDate:[{raw:ts("2026-10-28")}] }},
+   earningsTrend:{trend:[{period:"0q",endDate:"2026-12-31",
+    earningsEstimate:{avg:{raw:3.20}},revenueEstimate:{avg:{raw:142400000000}}}]},
+   earningsHistory:{history:[{quarter:{raw:ts("2026-09-30")},epsActual:{raw:2.12},
+    epsEstimate:{raw:3.01},surprisePercent:{raw:-0.2957}}]},
+   summaryDetail:{dividendRate:{raw:0.88},dividendYield:{raw:0.003},
+    payoutRatio:{raw:0.045},fiveYearAvgDividendYield:opts.providerFiveYearYield===undefined?null:{raw:opts.providerFiveYearYield}},
+   defaultKeyStatistics:{trailingEps:{raw:19}}
+  }]}}};
+  if(url.includes("/v7/finance/quote"))return {status:200,data:{quoteResponse:{result:opts.noFutureDate ? [] : [{
+   symbol:"GOOGL",earningsTimestampStart:ts("2027-02-03")
+  }]}}};
+  if(url.includes("/v8/finance/chart/GOOGL"))return {status:200,data:{chart:{result:[{
+   timestamp:[ts("2021-11-14"),ts("2026-11-13")],
+   events:{dividends:{first:{date:ts("2024-06-10"),amount:0.20},
+    last:{date:ts("2026-09-04"),amount:0.22}}}
+  }]}}};
+  throw new Error("URL inatteso: "+url);
+ };
+ it("does not treat an old quarterly report as the future, and clearly flags fallback estimate",async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date("2026-11-14T12:00:00Z"));
+  setHttp(response());
+  const ev=await loadCorporateEvents("GOOGL");
+  expect(ev.earnings.nextDate).toBe("2027-02-03");
+  expect(ev.earnings.nextDateStatus).toBe("stima_yahoo");
+  expect(ev.earnings.estimatePeriod).toBe("0q");
+  expect(ev.earnings.estimatePeriodEnd).toBe("2026-12-31");
+  expect(ev.earnings.epsEstimate).toBe(3.20);
+  expect(ev.earnings.revenueEstimate).toBe(142400000000);
+  expect(ev.earnings.history[0].surprisePct).toBeCloseTo(-29.5681,3);
+  expect(ev.dividends.yield).toBe(0.30);
+  expect(ev.dividends.fiveYearAvgYield).toBeNull();
+  expect(ev.dividends.fiveYearAvgYieldReason).toContain("inferiore a 5 anni");
+ });
+ it("explains a missing upcoming date instead of reusing the past report",async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date("2026-11-14T12:00:00Z"));
+  setHttp(response({noFutureDate:true,providerFiveYearYield:0.42}));
+  const ev=await loadCorporateEvents("GOOGL");
+  expect(ev.earnings.nextDate).toBeNull();
+  expect(ev.earnings.nextDateStatus).toBe("non_disponibile");
+  expect(ev.dividends.fiveYearAvgYield).toBe(0.42);
+ });
 });
