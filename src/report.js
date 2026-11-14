@@ -51,7 +51,7 @@ export function buildReportHtml({ data, tech, S, label, warns = [] }) {
   const [bg, fg] = LABEL_HEX[label] || LABEL_HEX["n.d."];
   const now = new Date();
   const stamp = now.toLocaleString("it-IT", { dateStyle: "long", timeStyle: "short" });
-  const conf = S.rel >= 75 ? "Alta" : S.rel >= 50 ? "Media" : "Bassa";
+  const coverage = S.rel >= 75 ? "Alta" : S.rel >= 50 ? "Media" : "Bassa";
 
   const scoreRows = Object.entries(S.scores).map(([k, s]) => {
     const w = isNum(s) ? Math.round(s) : 0;
@@ -100,7 +100,7 @@ export function buildReportHtml({ data, tech, S, label, warns = [] }) {
   const list = (arr) => (Array.isArray(arr) && arr.length ? `<ul>${arr.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "");
   const verdict = fi && !fi.failed && fi.motivation
     ? `<p>${esc(fi.motivation)}</p><div class="two"><div><h3>Punti di forza</h3>${list(fi.strengths)}</div><div><h3>Rischi</h3>${list(fi.risks)}</div></div>
-<table class="levels"><tbody><tr><td>Ingresso</td><td>Stop</td><td>Target</td></tr><tr><th>${esc(fi.entry || "n.d.")}</th><th>${esc(fi.stop || "n.d.")}</th><th>${esc(fi.target || "n.d.")}</th></tr></tbody></table>`
+<p class="mute">Livelli ingresso, stop e target omessi: il commento AI non è una fonte verificata per livelli operativi.</p>`
     : `<p class="mute">Commento del modello non disponibile.</p>`;
 
   const tr = [["Prezzo", `${nf(q.price)} ${q.currency || ""}`], ["Variazione", pf(q.changePct)], ["Capitalizzazione", isNum(q.marketCap) ? cf(q.marketCap) + (q.marketCapCurrency ? " " + q.marketCapCurrency : "") : "n.d."], ["Data/Fonte capitalizzazione", isNum(q.marketCap) ? ([q.marketCapAsOf,q.marketCapSource].filter(Boolean).join(" · ") || "n.d.") : "n.d."], ["SMA 50 / SMA 200", `${nf(q.sma50)} / ${nf(q.sma200)}`], ["RSI (14)", nf(q.rsi14, 1)], ["Supporti", (q.support || []).map((x) => nf(x)).join(" · ") || "n.d."], ["Resistenze", (q.resistance || []).map((x) => nf(x)).join(" · ") || "n.d."]];
@@ -126,7 +126,7 @@ ul { margin: 2px 0 0; padding-left: 16px; } li { margin: 1px 0; }
 .foot { margin-top: 10px; padding-top: 6px; border-top: 1px solid #cbd5e1; font-size: 9.5px; color: #475569; }
 </style></head><body>
 <div class="head"><div><h1>${esc(q.name || q.ticker || "Titolo")}</h1><div class="sub">${esc([q.ticker, q.exchange, q.currency].filter(Boolean).join(" · "))}</div><div class="mute">Report generato il ${esc(stamp)} &middot; dati aggiornati al ${esc(q.asOf || "n.d.")} &middot; fonte: ${esc(q.source || "n.d.")}</div></div>
-<div style="text-align:right"><span class="chip">${esc(label)}</span><div class="mute" style="margin-top:4px">Punteggio ${isNum(S.overall) ? Math.round(S.overall) : "n.d."}/100 &middot; Confidenza ${conf} (${S.rel}%)<br>Orizzonte: ${esc(fi.horizon || "n.d.")}</div></div></div>
+<div style="text-align:right"><span class="chip">${esc(label)}</span><div class="mute" style="margin-top:4px">Punteggio ${isNum(S.overall) ? Math.round(S.overall) : "n.d."}/100 &middot; Copertura dati ${coverage} (${S.rel}%)<br>Orizzonte: ${esc(fi.horizon || "n.d.")}</div></div></div>
 <section><h2>Punteggi</h2><table><tbody>${scoreRows}</tbody></table></section>
 <section><h2>Prezzo e analisi tecnica</h2>${priceChartSvg(tech)}${table(["Indicatore", "Valore"], tr)}</section>
 <section><h2>Bilanci</h2>${annual}${quarters ? `<div style="height:6px"></div>${quarters}` : ""}<div style="height:6px"></div>${table(["Solidità finanziaria", "Valore"], balance)}</section>
@@ -134,7 +134,7 @@ ul { margin: 2px 0 0; padding-left: 16px; } li { margin: 1px 0; }
 <section><h2>Sentiment di mercato</h2>${analysts}${strength}</section>
 <section><h2>Notizie recenti</h2>${n.officialSentiment ? `<p><b>Tono complessivo:</b> ${esc(n.officialSentiment)}</p>` : ""}${news ? `<ul>${news}</ul>` : '<p class="mute">Nessuna notizia disponibile.</p>'}${n.risks && n.risks.length ? `<p class="mute">Rischi segnalati dalle notizie: ${esc(n.risks.join(" · "))}</p>` : ""}</section>
 <section><h2>Giudizio</h2>${verdict}</section>
-<div class="foot">${warns.length ? `Note sui dati: ${esc(warns.join(" | "))}<br>` : ""}Analisi informativa e automatizzata, non è consulenza finanziaria. I dati possono contenere errori: verificarli su fonti ufficiali prima di qualsiasi decisione. Dati da Yahoo Finance${a.source && /Finnhub/.test(a.source) ? " e Finnhub" : ""}; commento generato da un modello di intelligenza artificiale.</div>
+<div class="foot">${warns.length ? `Note sui dati: ${esc(warns.join(" | "))}<br>` : ""}Analisi informativa e automatizzata, non è consulenza finanziaria. Il punteggio è euristico e non costituisce una probabilità di successo. Il commento AI non è verificato in ogni sua affermazione. Verificare i dati presso fonti ufficiali. Dati da Yahoo Finance${a.source && /Finnhub/.test(a.source) ? " e Finnhub" : ""}; commento generato da un modello di intelligenza artificiale.</div>
 </body></html>`;
 }
 
