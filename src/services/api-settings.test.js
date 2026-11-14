@@ -24,12 +24,13 @@ describe("shared API settings", () => {
     expect(getApiKey("alphavantage")).toBe("legacy-av");
   });
 
-  it("saves credentials centrally and keeps legacy compatibility", () => {
+  it("saves credentials centrally without duplicating legacy entries", () => {
     globalThis.localStorage = memoryStorage();
+    localStorage.setItem("fred_api_key", "old-secret");
     saveApiKey("fred", " fred-secret ");
     expect(getApiKey("fred")).toBe("fred-secret");
     expect(JSON.parse(localStorage.getItem("aa_api_settings_v1")).fred).toBe("fred-secret");
-    expect(localStorage.getItem("fred_api_key")).toBe("fred-secret");
+    expect(localStorage.getItem("fred_api_key")).toBe(null);
     expect(getApiSettingsStatus().fred).toBe(true);
   });
 
