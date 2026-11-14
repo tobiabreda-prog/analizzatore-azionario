@@ -7,7 +7,7 @@ import { assessAnalysisReadiness } from "./core/analysis-gate.js";
 import V2Console from "./ui/V2Console.jsx";
 import { getApiKey, saveApiKey } from "./services/api-settings.js";
 import { readAnalysisSection, readAnalysisSnapshot, writeAnalysisSection, analysisFingerprint } from "./services/analysis-cache.js";
-import { listGeminiModels } from "./services/gemini-models.js";
+import { listGeminiModels, approvedReportModels } from "./services/gemini-models.js";
 import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key, Printer } from "lucide-react";
 
 const POPULAR_TICKERS = [
@@ -37,8 +37,8 @@ function parseJSON(txt) {
 async function callGeminiAPI(systemInstruction,userPrompt) {
   const apiKey=getApiKey("gemini");
   if(!apiKey)throw new Error("Chiave Gemini mancante: inseriscila nelle impostazioni.");
-  const models=(await listGeminiModels(apiKey)).filter(m=>/flash/i.test(m.name)).slice(0,4);
-  if(!models.length)throw new Error("Nessun modello Gemini Flash disponibile per questa chiave.");
+  const models=approvedReportModels(await listGeminiModels(apiKey));
+  if(!models.length)throw new Error("gemini-3.5-flash-lite non disponibile per la chiave. Nessun passaggio automatico a modelli alternativi.");
   const payload={
     contents:[{role:"user",parts:[{text:userPrompt}]}],
     systemInstruction:{parts:[{text:systemInstruction}]},
@@ -264,8 +264,10 @@ export default function AnalizzatoreAzionario() {
     try {
       const k=keyVal.trim();
       if(!k)throw new Error("Inserisci prima la chiave Gemini.");
-      const models=await listGeminiModels(k);
-      setTestMsg("Chiave riconosciuta: "+models.length+" modelli generateContent disponibili. L'accesso alla ricerca web e le quote si verificano durante la richiesta reale.");
+      const models=approvedReportModels(await listGeminiModels(k));
+      setTestMsg(models.length
+        ? "gemini-3.5-flash-lite presente nel catalogo della chiave. Quota e costi effettivi non verificabili con questo test."
+        : "Chiave valida per consultare il catalogo, ma gemini-3.5-flash-lite non risulta disponibile. Il commento AI resterà disabilitato.");
     }catch(e){setTestMsg("Test non riuscito: "+String(e.message||e));}
     finally{setTesting(false);}
   };
@@ -552,7 +554,7 @@ export default function AnalizzatoreAzionario() {
           <div className={`rounded-xl border p-3 text-sm space-y-2 ${th.card}`}>
             <div className="font-medium">Chiave API Gemini</div>
             <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-500 underline underline-offset-2">Ottieni la chiave Gemini — Google AI Studio ↗</a>
-            <div className={`text-xs ${th.mute}`}>Salvata solo su questo dispositivo. Usa un progetto Google AI Studio senza fatturazione collegata: l’app usa solo gemini-3.5-flash-lite e non attiva Search grounding.</div>
+            <div className={`text-xs ${th.mute}`}>Salvata localmente sul dispositivo. L’app usa soltanto gemini-3.5-flash-lite, senza Search grounding né passaggi automatici ad altri modelli. Il costo dipende dalle impostazioni del tuo progetto Google: controlla fatturazione e quote su AI Studio.</div>
             <input type="password" value={keyVal} onChange={(e) => setKeyVal(e.target.value)} placeholder="Please, insert relative API key" className={`w-full px-3 py-2 rounded-lg border text-sm ${th.inp}`} />
             <div className="font-medium pt-1">Chiave Alpha Vantage (facoltativa)</div>
             <a href="https://www.alphavantage.co/support/#api-key" target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-500 underline underline-offset-2">Ottieni la chiave Alpha Vantage ↗</a>
