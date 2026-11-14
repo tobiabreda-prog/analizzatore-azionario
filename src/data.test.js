@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadQuote, loadFundamentals, mergeQuoteMarketCap, loadMarketCapFallback, loadCorporateEvents, resetYahooSession, setHttp } from "./data.js";
+import { loadQuote, loadFundamentals, mergeQuoteMarketCap, loadMarketCapFallback, loadCorporateEvents, resetYahooSession, histMedian, pairedWeeklyReturns, buildFin, setHttp } from "./data.js";
 
 afterEach(() => {
   setHttp(async () => { throw new Error("HTTP mock non configurato"); });
@@ -173,5 +173,70 @@ describe("GOOGL earnings and dividend intelligence",()=>{
   expect(ev.earnings.nextDate).toBeNull();
   expect(ev.earnings.nextDateStatus).toBe("non_disponibile");
   expect(ev.dividends.fiveYearAvgYield).toBe(0.42);
+ });
+});
+
+
+describe("fundamental data consistency and historical comparisons",()=>{
+ const point=(d,v)=>({d,v});
+ const series=(...pts)=>pts.map(([d,v])=>point(d,v));
+ it("rejects four recent valuation observations masquerading as five years",()=>{
+  const v=series(["2026-01-01",20],["2026-04-01",22],["2026-07-01",25],["2026-10-01",24]);
+  expect(histMedian(v,Date.parse("2026-11-14T12:00:00Z"))).toBeNull();
+ });
+ it("admits a genuine well-covered five-year valuation series",()=>{
+  const years=["2022-01-01","2022-07-01","2023-01-01","2023-07-01",
+   "2024-01-01","2024-07-01","2025-01-01","2025-07-01","2026-01-01","2026-10-31"];
+  const result=histMedian(years.map((d,i)=>point(d,10+i)),Date.parse("2026-11-14T12:00:00Z"));
+  expect(result?.v).toBe(14.5);
+  expect(result?.span).toBeGreaterThan(4.4);
+  expect(result?.observations).toBe(10);
+ });
+ it("rejects old snapshots even when the historical span exceeds 4 years",()=>{
+  const years=["2019-09-01","2020-04-01","2020-10-01","2021-04-01",
+   "2021-10-01","2022-04-01","2022-10-01","2023-04-01","2024-01-01"];
+  expect(histMedian(years.map((d,i)=>point(d,10+i)),Date.parse("2026-11-14T12:00:00Z"))).toBeNull();
+ });
+ it("never divides income by equity or EBIT by interest from different fiscal years",()=>{
+  const s={
+   annualTotalRevenue:series(["2025-12-31",1000000000]),
+   annualNetIncome:series(["2024-12-31",100000000],["2025-12-31",120000000]),
+   annualStockholdersEquity:series(["2024-12-31",800000000]),
+   annualEBIT:series(["2025-12-31",200000000]),
+   annualInterestExpense:series(["2024-12-31",30000000]),
+   annualCurrentAssets:series(["2025-12-31",500000000]),
+   annualCurrentLiabilities:series(["2024-12-31",250000000]),
+   annualTaxRateForCalcs:series(["2025-12-31",0.25]),
+   annualInvestedCapital:series(["2025-12-31",900000000])
+  };
+  const result=buildFin(s);
+  expect(result.balance.roe).toBeNull();
+  expect(result.balance.interestCover).toBeNull();
+  expect(result.balance.currentRatio).toBeNull();
+  expect(result.balance.roic).toBeCloseTo(16.7,1);
+  s.annualStockholdersEquity.push(point("2025-12-31",900000000));
+  s.annualInterestExpense.push(point("2025-12-31",40000000));
+  s.annualCurrentLiabilities.push(point("2025-12-31",250000000));
+  const aligned=buildFin(s);
+  expect(aligned.balance.roe).toBeCloseTo(13.3,1);
+  expect(aligned.balance.interestCover).toBeCloseTo(5,4);
+  expect(aligned.balance.currentRatio).toBeCloseTo(2,4);
+ });
+ it("aligns equity and benchmark on identical trading weeks, despite different day stamps",()=>{
+  const ts=Date.parse("2026-11-13T00:00:00Z");
+  const fmt=t=>new Date(t).toISOString().slice(0,10);
+  const stock=Array.from({length:54},(_,i)=>{
+   const t=ts-(53-i)*7*864e5;
+   return [fmt(t),100+i];
+  });
+  const index=stock.map((r,i)=>[fmt(Date.parse(r[0]+"T00:00:00Z")-4*864e5),200+2*i]);
+  const paired=pairedWeeklyReturns(stock,index);
+  expect(paired.stock.r13).toBeCloseTo((153/140-1)*100,1);
+  expect(paired.index.r13).toBeCloseTo((306/280-1)*100,1);
+  expect(paired.stock.r52).not.toBeNull();
+  const previousOnly=index.slice(0,-1);
+  expect(pairedWeeklyReturns(stock,previousOnly)).toBeNull();
+  const noPrior=index.filter((_,i)=>i!==40);
+  expect(pairedWeeklyReturns(stock,noPrior)?.index.r13).toBeNull();
  });
 });
