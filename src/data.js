@@ -27,6 +27,7 @@ const store = {
 const today = () => new Date().toISOString().slice(0, 10);
 
 const num = (x) => (typeof x === "number" && isFinite(x) ? x : null);
+const positiveCap = (x) => num(x) != null && x > 0;
 const round = (x, d = 2) => (num(x) == null ? null : Math.round(x * 10 ** d) / 10 ** d);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -132,7 +133,13 @@ export async function loadQuote(input) {
     price: round(price, 4),
     prevClose: round(prev, 4),
     changePct: prev ? round((price / prev - 1) * 100, 2) : null,
-    marketCap: null,
+    // The Yahoo chart sometimes exposes marketCap directly; do not fabricate it.
+    marketCap: positiveCap(meta.marketCap) && meta.instrumentType !== "ETF" ? meta.marketCap : null,
+    marketCapAsOf: positiveCap(meta.marketCap) && meta.instrumentType !== "ETF"
+      ? (num(meta.regularMarketTime) != null ? isoDate(meta.regularMarketTime) : rows[n - 1].date) : null,
+    marketCapSource: positiveCap(meta.marketCap) && meta.instrumentType !== "ETF" ? "Yahoo Finance · chart" : null,
+    marketCapCurrency: positiveCap(meta.marketCap) && meta.instrumentType !== "ETF" ? (meta.currency || null) : null,
+    instrumentType: meta.instrumentType || null,
     asOf: rows[n - 1].date,
     priceType: "daily_close",
     source: "Yahoo Finance",
@@ -260,7 +267,8 @@ async function buildVal(s, symbol, {includePeers=true}={}) {
   let {peers,sector,via}=includePeers?await loadPeerValuation(symbol):{peers:[],sector:{},via:""};
   const metrics = Object.keys(VAL_TYPES).filter((k) => own[k] != null).map((k) => ({ k, v: own[k], sector: sector[k] ?? null, hist5y: hist[k] ?? null, date: dates[k] }));
   return {
-    metrics, peers, marketCap: lastVal(s, "trailingMarketCap"),
+    metrics, peers, marketCap: positiveCap(lastVal(s, "trailingMarketCap")) ? lastVal(s, "trailingMarketCap") : null,
+    marketCapAsOf: s.trailingMarketCap?.at(-1)?.d || null,
     histYears: spans.length ? round(Math.min(...spans), 1) : null,
     asOf: new Date().toISOString().slice(0, 10),
     source: "Yahoo Finance" + (peers.length ? ` + peer (${via})` : ""),
@@ -273,6 +281,50 @@ export async function loadFundamentals(symbol,options={}) {
   const fin = buildFin(s);
   const val = await buildVal(s, symbol, options);
   return { fin, val };
+}
+
+/**
+ * Reuse the already-fetched Yahoo valuation timeseries for the header and PDF.
+ * An old market cap is NOT a current market cap: reject snapshots older than
+ * 45 days relative to the dated daily quote. Do not infer shares or FX.
+ */
+export function mergeQuoteMarketCap(quote, val) {
+  if (!quote || positiveCap(quote.marketCap) || quote.instrumentType === "ETF") return quote;
+  const value = val?.marketCap, date = val?.marketCapAsOf;
+  if (!positiveCap(value) || typeof date !== "string" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) return quote;
+  const quoteDate = Date.parse(quote.asOf), capDate = Date.parse(date);
+  const days = (quoteDate - capDate) / 864e5;
+  if (!Number.isFinite(days) || days < -7 || days > 45) return quote;
+  return { ...quote, marketCap: value, marketCapAsOf: date,
+    marketCapCurrency: quote.currency || null, marketCapSource: "Yahoo Finance · serie valutazioni" };
+}
+
+/**
+ * Optional Yahoo quote-endpoint fallback when both chart and timeseries omit cap.
+ * This is an undocumented provider interface and may require Yahoo session crumb.
+ * Failure is nonfatal and must never turn into a made-up figure.
+ */
+export async function loadMarketCapFallback(symbol, expectedCurrency = "", priceDate = "") {
+  const sym = String(symbol || "").trim().toUpperCase();
+  if (!/^[A-Z0-9.^:_=-]{1,30}$/.test(sym)) return null;
+  const query = { symbols: sym, formatted: "false", lang: "en-US", region: "US" };
+  let r = await yget("/v7/finance/quote", query);
+  if (r.status === 401 || r.status === 403) {
+    const session = await yahooCrumb();
+    r = await yget("/v7/finance/quote", { ...query, crumb: session.crumb },
+      session.cookie ? { Cookie: session.cookie } : {});
+  }
+  if (r.status !== 200) return null;
+  const q = (r.data?.quoteResponse?.result || []).find(x => String(x?.symbol || "").toUpperCase() === sym);
+  if (!q || q.quoteType === "ETF" || !positiveCap(q.marketCap)) return null;
+  if (expectedCurrency && q.currency && q.currency !== expectedCurrency) return null;
+  const date = num(q.regularMarketTime) != null ? isoDate(q.regularMarketTime) : null;
+  if (!date) return null; // no timestamp: cannot confirm the market cap's as-of date
+  const difference = (Date.parse(priceDate) - Date.parse(date)) / 864e5;
+  if (priceDate && (!Number.isFinite(difference) || Math.abs(difference) > 7)) return null;
+  return { marketCap: q.marketCap, marketCapAsOf: date,
+    marketCapCurrency: q.currency || expectedCurrency || null,
+    marketCapSource: "Yahoo Finance · quote" };
 }
 
 // ---------- Analisti: Yahoo Finance, Alpha Vantage come fallback USA ----------
