@@ -1,5 +1,6 @@
 // Independent, timestamped caches: a Gemini failure must never invalidate verified market data.
 // No API keys are written here. Cached quotations are historical snapshots, not live prices.
+import { FINANCIALS_SCHEMA_VERSION } from "../core/fiscal-periods.js";
 const KEY = "aa_analysis_segments_v1";
 const MAX_SYMBOLS = 20;
 const MAX_AGE = 30 * 24 * 60 * 60 * 1000;
@@ -31,6 +32,9 @@ export function readAnalysisSection(symbol, section, {allowStale=false, now=Date
   if(!validSection(section))return null;
   const entry=load()[normalizeSymbol(symbol)]?.[section];
   if(!entry || !Number.isFinite(entry.ts) || entry.ts>now || now-entry.ts>MAX_AGE || entry.value===undefined || entry.value===null)return null;
+  // Year-only financial rows may already contain cross-period joins. Refetch
+  // those statements instead of reusing them, even as an offline fallback.
+  if(section==="fin" && entry.value.schemaVersion!==FINANCIALS_SCHEMA_VERSION)return null;
   const stale=now-entry.ts>ANALYSIS_TTL[section];
   return (stale&&!allowStale) ? null : {value:entry.value,ts:entry.ts,stale};
 }

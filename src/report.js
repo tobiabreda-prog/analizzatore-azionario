@@ -58,7 +58,7 @@ export function buildReportHtml({ data, tech, S, label, warns = [] }) {
     return `<tr><td>${esc(k)}</td><td class="bar"><div class="track"><div class="fill" style="width:${w}%"></div></div></td><td class="r">${isNum(s) ? Math.round(s) + "/100" : "n.d."}</td></tr>`;
   }).join("");
 
-  const annual = table(["Anno", "Ricavi (mln)", "Utile netto", "EBITDA", "FCF", "EPS"], (f.annual || []).map((r) => [r.y, mf(r.rev), mf(r.ni), mf(r.ebitda), mf(r.fcf), nf(r.eps)]));
+  const annual = table(["Fine esercizio", "Ricavi (mln)", "Utile netto", "EBITDA", "FCF", "EPS"], (f.annual || []).map((r) => [r.periodEnd || r.y, mf(r.rev), mf(r.ni), mf(r.ebitda), mf(r.fcf), nf(r.eps)]));
   const quarters = table(["Trimestre", "Ricavi (mln)", "Utile netto", "EPS"], (f.quarters || []).map((r) => [r.p, mf(r.rev), mf(r.ni), nf(r.eps)]));
   const b = f.balance || {};
   const balance = [["Debito netto (mln)", mf(b.netDebt)], ["Debito totale (mln)", mf(b.totalDebt)], ["Patrimonio netto (mln)", mf(b.equity)], ["Current ratio", nf(b.currentRatio)], ["Copertura interessi", nf(b.interestCover, 1)], ["ROE", isNum(b.roe) ? nf(b.roe, 1) + "%" : "n.d."]];

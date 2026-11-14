@@ -2,6 +2,8 @@
 // Gemini interpreta il report; la ricerca WACC opzionale usa grounding web, con verifica separata delle fonti.
 import { CapacitorHttp } from "@capacitor/core";
 import { earningsSurprise, fiveYearYieldInfo } from "./modules/earnings-dividends.js";
+import { validIsoDate } from "./core/analysis-gate.js";
+import { FINANCIALS_SCHEMA_VERSION } from "./core/fiscal-periods.js";
 
 const UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36";
 
@@ -181,26 +183,34 @@ const Q_TYPES = ["quarterlyTotalRevenue", "quarterlyNetIncome", "quarterlyDilute
 // A ratio is available only if every input belongs to the same fiscal year end.
 function samePeriod(s, periodEnd, ...types) {
   if (!periodEnd) return null;
-  const items=types.map(type=>(s[type]||[]).find(e=>e.d===periodEnd));
+  const items=types.map(type=>(s[type]||[]).filter(e=>e?.d===periodEnd&&num(e.v)!=null).at(-1));
   return items.every(x=>x&&num(x.v)!=null) ? items.map(x=>x.v) : null;
 }
-export function buildFin(s) {
-  const byYear = {};
-  const put = (type, key, conv) => (s[type] || []).forEach((e) => { const y = Number(e.d.slice(0, 4)); (byYear[y] = byYear[y] || { y })[key] = conv(e.v); });
+export function buildFin(s = {}) {
+  // Calendar years alone can combine unrelated fiscal ends during a reporting-year change.
+  const byPeriod = new Map();
+  const put = (type, key, conv) => (s[type] || []).forEach((e) => {
+    if (!validIsoDate(e?.d) || num(e.v) == null) return;
+    const row = byPeriod.get(e.d) || { y: Number(e.d.slice(0, 4)), periodEnd: e.d };
+    row[key] = conv(e.v);
+    byPeriod.set(e.d, row);
+  });
   put("annualTotalRevenue", "rev", M); put("annualNetIncome", "ni", M); put("annualEBITDA", "ebitda", M);
   put("annualGrossProfit", "gp", M); put("annualOperatingIncome", "op", M); put("annualDilutedEPS", "eps", (v) => round(v, 2));
   put("annualFreeCashFlow", "fcf", M);
-  const annual = Object.values(byYear).filter((r) => r.rev != null).sort((a, b) => a.y - b.y).slice(-5)
-    .map((r) => ({ y: r.y, rev: r.rev, ni: r.ni ?? null, ebitda: r.ebitda ?? null, gp: r.gp ?? null, op: r.op ?? null, eps: r.eps ?? null, fcf: r.fcf ?? null }));
+  const annual = [...byPeriod.values()].filter((r) => r.rev != null).sort((a, b) => a.periodEnd.localeCompare(b.periodEnd)).slice(-5)
+    .map((r) => ({ y: r.y, periodEnd: r.periodEnd, rev: r.rev, ni: r.ni ?? null, ebitda: r.ebitda ?? null, gp: r.gp ?? null, op: r.op ?? null, eps: r.eps ?? null, fcf: r.fcf ?? null }));
 
   const qMap = {};
-  const putQ = (type, key, conv) => (s[type] || []).forEach((e) => { (qMap[e.d] = qMap[e.d] || { d: e.d })[key] = conv(e.v); });
+  const putQ = (type, key, conv) => (s[type] || []).forEach((e) => {
+    if (validIsoDate(e?.d) && num(e.v) != null) (qMap[e.d] = qMap[e.d] || { d: e.d })[key] = conv(e.v);
+  });
   putQ("quarterlyTotalRevenue", "rev", M); putQ("quarterlyNetIncome", "ni", M); putQ("quarterlyDilutedEPS", "eps", (v) => round(v, 2));
   const quarters = Object.values(qMap).filter((r) => r.rev != null).sort((a, b) => (a.d < b.d ? -1 : 1)).slice(-5)
-    .map((r) => ({ p: `Q${Math.ceil(Number(r.d.slice(5, 7)) / 3)} ${r.d.slice(0, 4)}`, rev: r.rev, ni: r.ni ?? null, eps: r.eps ?? null }));
+    .map((r) => ({ p: `Q${Math.ceil(Number(r.d.slice(5, 7)) / 3)} ${r.d.slice(0, 4)}`, periodEnd: r.d, rev: r.rev, ni: r.ni ?? null, eps: r.eps ?? null }));
 
-  const lastDate = (s.annualTotalRevenue || []).slice(-1)[0]?.d || "";
-  const eq = lastVal(s, "annualStockholdersEquity");
+  const lastDate = annual.at(-1)?.periodEnd || "";
+  const eq = samePeriod(s,lastDate,"annualStockholdersEquity")?.[0] ?? null;
   const [ca,cl] = samePeriod(s,lastDate,"annualCurrentAssets","annualCurrentLiabilities") || [null,null];
   const roeInputs=samePeriod(s,lastDate,"annualNetIncome","annualStockholdersEquity");
   const interestInputs=samePeriod(s,lastDate,"annualEBIT","annualInterestExpense")
@@ -215,9 +225,11 @@ export function buildFin(s) {
   const roe=roeInputs&&roeInputs[1]>0?round(100*roeInputs[0]/roeInputs[1],1):null;
   const roic=roicEbit!=null&&investedCapital>0&&tax!=null?round(100*roicEbit*(1-tax)/investedCapital,1):null;
   return {
-    annual, quarters,
+    schemaVersion: FINANCIALS_SCHEMA_VERSION, annual, quarters,
     balance: {
-      netDebt: M(lastVal(s, "annualNetDebt")), totalDebt: M(lastVal(s, "annualTotalDebt")), equity: M(eq),
+      periodEnd: lastDate || null,
+      netDebt: M(samePeriod(s,lastDate,"annualNetDebt")?.[0]),
+      totalDebt: M(samePeriod(s,lastDate,"annualTotalDebt")?.[0]), equity: M(eq),
       currentRatio, interestCover, roe, roic,
     },
     lastReportDate: lastDate,
