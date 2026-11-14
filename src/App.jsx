@@ -151,7 +151,7 @@ export function computeScores(D, tech) {
   const scores = { "Trend tecnico": tS, Crescita: gS, Redditività: rS, "Solidità finanziaria": sS, Valutazione: vS, Sentiment: seS };
   let wsum = 0, tot2 = 0;
   Object.entries(scores).forEach(([k, s]) => { if (s != null) { wsum += WEIGHTS[k]; tot2 += s * WEIGHTS[k]; } });
-  const readiness = assessAnalysisReadiness({ quote: q, fin: f, val: v, scores });
+  const readiness = assessAnalysisReadiness({ quote: q, fin: f, val: v, scores, sector: a?.sector, industry: a?.industry });
   const overall = readiness.ready && wsum ? tot2 / wsum : null;
   let rel = readiness.ready ? (Object.values(scores).filter((x) => x != null).length / 6) * 100 : 0;
   const stale = daysOld(q?.asOf) > 2 || f?.isLatest === false;
@@ -882,6 +882,9 @@ export default function AnalizzatoreAzionario() {
                   {Object.entries(WEIGHTS).map(([k, w]) => (<div key={k} className="flex justify-between border-b py-1" style={{ borderColor: th.grid }}><span>{k} <span className={th.mute}>(peso {Math.round(w * 100)}%)</span></span><b>{S.scores[k] != null ? nf(S.scores[k], 0) : "n.d."}</b></div>))}
                   <div className="flex justify-between pt-1 text-base"><span>Punteggio complessivo</span><b>{S.overall != null ? nf(S.overall, 0) + "/100" : "n.d."}</b></div>
                   <div className={`text-xs ${th.mute}`}>Media ponderata sui soli punteggi disponibili. Copertura dati: {S.rel}%</div>
+                  <div className={`text-xs ${th.mute}`}>Pesi euristici non calibrati; il punteggio non misura una probabilità di rendimento.
+                    {a?.sector ? " Settore Yahoo: "+a.sector+" · "+(a.sectorSource||"fonte da verificare") : " Settore non verificato: l'analisi è generalista."}
+                  </div>
                   {!S.readiness.ready && <div role="alert" className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs"><b>Segnale sospeso — dati insufficienti.</b><ul className="list-disc pl-4 mt-1">{S.readiness.reasons.map((reason,i)=><li key={i}>{reason}</li>)}</ul></div>}
                 </div>
               </div>

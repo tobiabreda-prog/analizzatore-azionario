@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadQuote, loadFundamentals, mergeQuoteMarketCap, loadMarketCapFallback, loadCorporateEvents, resetYahooSession, histMedian, pairedWeeklyReturns, buildFin, setHttp } from "./data.js";
+import { loadQuote, loadFundamentals, mergeQuoteMarketCap, loadMarketCapFallback, loadCorporateEvents, resetYahooSession, histMedian, pairedWeeklyReturns, buildFin, loadAnalysts, setHttp } from "./data.js";
 
 afterEach(() => {
   setHttp(async () => { throw new Error("HTTP mock non configurato"); });
@@ -238,5 +238,36 @@ describe("fundamental data consistency and historical comparisons",()=>{
   expect(pairedWeeklyReturns(stock,previousOnly)).toBeNull();
   const noPrior=index.filter((_,i)=>i!==40);
   expect(pairedWeeklyReturns(stock,noPrior)?.index.r13).toBeNull();
+ });
+});
+
+
+describe("sector metadata from quoteSummary",()=>{
+ const yahooMock=(unsupportedProfile=false)=>async url=>{
+  if(url==="https://fc.yahoo.com")return {status:200,headers:{"set-cookie":"A1=test-cookie; Path=/"},data:""};
+  if(url.includes("/v1/test/getcrumb"))return {status:200,data:"testcrumb123",headers:{}};
+  if(url.includes("/v10/finance/quoteSummary/TEST")){
+   if(unsupportedProfile&&url.includes("assetProfile"))return {status:400,data:{error:"unsupported module"}};
+   return {status:200,data:{quoteSummary:{result:[{
+    financialData:{targetMeanPrice:{raw:110}},
+    recommendationTrend:{trend:[{buy:{raw:3},sell:{raw:1},hold:{raw:2}}]},
+    ...(unsupportedProfile?{}:{assetProfile:{sector:"Financial Services",industry:"Banks - Diversified"}})
+   }]}}};
+  }
+  throw new Error("Unexpected URL: "+url);
+ };
+ it("reads provider sector without inventing classification",async()=>{
+  setHttp(yahooMock());
+  const result=await loadAnalysts("TEST");
+  expect(result.sector).toBe("Financial Services");
+  expect(result.industry).toBe("Banks - Diversified");
+  expect(result.sectorSource).toContain("Yahoo Finance");
+  expect(result.targetMean).toBe(110);
+ });
+ it("keeps analyst data when profile module is unavailable",async()=>{
+  setHttp(yahooMock(true));
+  const result=await loadAnalysts("TEST");
+  expect(result.targetMean).toBe(110);
+  expect(result.sector).toBeNull();
  });
 });

@@ -395,13 +395,20 @@ const raw = (x) => (x && typeof x === "object" ? num(x.raw) : num(x));
 async function yahooAnalysts(symbol) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const c = await yahooCrumb(attempt > 0);
-    const r = await yget(`/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`, { modules: "financialData,recommendationTrend", crumb: c.crumb, formatted: "false", lang: "en-US", region: "US" }, c.cookie ? { Cookie: c.cookie } : {});
+    const path=`/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`;
+    const query=modules=>({modules,crumb:c.crumb,formatted:"false",lang:"en-US",region:"US"});
+    const headers=c.cookie?{Cookie:c.cookie}:{};
+    let r=await yget(path,query("financialData,recommendationTrend,assetProfile"),headers);
+    // Certain Yahoo geographies may reject assetProfile: preserve the old analyst response.
+    if(r.status===400)r=await yget(path,query("financialData,recommendationTrend"),headers);
     if (r.status === 401 || r.status === 403) { crumbCache = null; continue; }
     if (r.status !== 200) throw new Error(`Yahoo quoteSummary HTTP ${r.status}`);
     const res = r.data?.quoteSummary?.result?.[0] || {};
-    const fd = res.financialData || {}, t = (res.recommendationTrend?.trend || [])[0] || {};
+    const fd = res.financialData || {}, profile=res.assetProfile || {}, t = (res.recommendationTrend?.trend || [])[0] || {};
     const buy = (raw(t.strongBuy) || 0) + (raw(t.buy) || 0), hold = raw(t.hold) || 0, sell = (raw(t.sell) || 0) + (raw(t.strongSell) || 0);
-    return { targetMean: raw(fd.targetMeanPrice), targetMin: raw(fd.targetLowPrice), targetMax: raw(fd.targetHighPrice), nOpinions: raw(fd.numberOfAnalystOpinions), ratings: { buy, hold, sell } };
+    return { targetMean: raw(fd.targetMeanPrice), targetMin: raw(fd.targetLowPrice), targetMax: raw(fd.targetHighPrice), nOpinions: raw(fd.numberOfAnalystOpinions), ratings: { buy, hold, sell },
+      sector:typeof profile.sector==="string"?profile.sector:null,
+      industry:typeof profile.industry==="string"?profile.industry:null };
   }
   throw new Error("accesso a Yahoo negato (crumb non valido)");
 }
@@ -425,12 +432,14 @@ const avNum = (x) => { const n = Number(x); return x != null && x !== "None" && 
 
 // Yahoo Finance è la fonte primaria; Alpha Vantage è un fallback limitato ai titoli USA.
 export async function loadAnalysts(symbol, _unusedKey, avKey) {
-  const out = { targetMean: null, targetMin: null, targetMax: null, ratings: { buy: 0, hold: 0, sell: 0 }, nAnalysts: 0, asOf: new Date().toISOString().slice(0, 10), source: "n.d." };
+  const out = { targetMean: null, targetMin: null, targetMax: null, ratings: { buy: 0, hold: 0, sell: 0 }, nAnalysts: 0,
+    sector:null,industry:null,sectorSource:null,asOf: new Date().toISOString().slice(0, 10), source: "n.d." };
   const sources = [], reasons = [];
   const ratingsTotal = () => out.ratings.buy + out.ratings.hold + out.ratings.sell;
 
   try {
     const y = await yahooAnalysts(symbol);
+    if(y.sector||y.industry){out.sector=y.sector;out.industry=y.industry;out.sectorSource="Yahoo Finance · assetProfile";}
     let used = false;
     if (y.targetMean != null) { out.targetMean = y.targetMean; out.targetMin = y.targetMin; out.targetMax = y.targetMax; used = true; }
     const total = y.ratings.buy + y.ratings.hold + y.ratings.sell;
@@ -442,6 +451,9 @@ export async function loadAnalysts(symbol, _unusedKey, avKey) {
   if (avKey && isUS(symbol) && (out.targetMean == null || ratingsTotal() === 0)) {
     try {
       const overview = await alphaOverview(symbol, avKey);
+      if(!out.sector&&typeof overview.Sector==="string"&&overview.Sector!=="None"){
+        out.sector=overview.Sector;out.industry=overview.Industry||null;out.sectorSource="Alpha Vantage · OVERVIEW";
+      }
       let used = false;
       if (out.targetMean == null && avNum(overview.AnalystTargetPrice) != null) { out.targetMean = avNum(overview.AnalystTargetPrice); used = true; }
       if (ratingsTotal() === 0) {

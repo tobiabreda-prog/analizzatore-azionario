@@ -18,8 +18,18 @@ function ageDays(date, now) {
  * Missing values never count as zero. A score is allowed only when price,
  * statements, valuation references, factor coverage and history chronology pass.
  */
-export function assessAnalysisReadiness({ quote, fin, val, scores = {}, now = new Date() } = {}) {
+export function assessAnalysisReadiness({ quote, fin, val, scores = {}, sector = null, industry = null, now = new Date() } = {}) {
   const reasons = [];
+  const sectorText=String(sector||"").trim().toLowerCase();
+  const industryText=String(industry||"").trim().toLowerCase();
+  // A generalized industrial debt/EBITDA model is inappropriate for regulated
+  // financial firms and REITs. Without confirmed sector metadata this cannot
+  // prove the model is suitable: the report must still say it is provisional.
+  const specializedSector=sectorText==="financial services" || sectorText==="real estate"
+    || /bank|insur|reit|financial|mortgage|asset management/i.test(industryText);
+  if(specializedSector){
+    reasons.push("Valutazione generalista non applicabile a settore finanziario/immobiliare: necessari indicatori e pesi settoriali validati");
+  }
   const priceAge = ageDays(quote?.asOf, now);
   if (!finite(quote?.price) || quote.price <= 0) reasons.push("Prezzo non valido");
   if (!quote?.currency) reasons.push("Valuta del prezzo assente");
