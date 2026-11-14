@@ -291,7 +291,7 @@ export async function loadFundamentals(symbol,options={}) {
 export function mergeQuoteMarketCap(quote, val) {
   if (!quote || positiveCap(quote.marketCap) || quote.instrumentType === "ETF") return quote;
   const value = val?.marketCap, date = val?.marketCapAsOf;
-  if (!positiveCap(value) || typeof date !== "string" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) return quote;
+  if (!positiveCap(value) || typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return quote;
   const quoteDate = Date.parse(quote.asOf), capDate = Date.parse(date);
   const days = (quoteDate - capDate) / 864e5;
   if (!Number.isFinite(days) || days < -7 || days > 45) return quote;
