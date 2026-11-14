@@ -178,7 +178,13 @@ const M = (x) => (num(x) == null ? null : round(x / 1e6, 1));
 const ANNUAL_TYPES = ["annualTotalRevenue", "annualNetIncome", "annualEBITDA", "annualGrossProfit", "annualOperatingIncome", "annualDilutedEPS", "annualFreeCashFlow", "annualTotalDebt", "annualNetDebt", "annualStockholdersEquity", "annualCurrentAssets", "annualCurrentLiabilities", "annualInterestExpense", "annualEBIT", "annualTaxRateForCalcs", "annualInvestedCapital"];
 const Q_TYPES = ["quarterlyTotalRevenue", "quarterlyNetIncome", "quarterlyDilutedEPS"];
 
-function buildFin(s) {
+// A ratio is available only if every input belongs to the same fiscal year end.
+function samePeriod(s, periodEnd, ...types) {
+  if (!periodEnd) return null;
+  const items=types.map(type=>(s[type]||[]).find(e=>e.d===periodEnd));
+  return items.every(x=>x&&num(x.v)!=null) ? items.map(x=>x.v) : null;
+}
+export function buildFin(s) {
   const byYear = {};
   const put = (type, key, conv) => (s[type] || []).forEach((e) => { const y = Number(e.d.slice(0, 4)); (byYear[y] = byYear[y] || { y })[key] = conv(e.v); });
   put("annualTotalRevenue", "rev", M); put("annualNetIncome", "ni", M); put("annualEBITDA", "ebitda", M);
@@ -193,22 +199,26 @@ function buildFin(s) {
   const quarters = Object.values(qMap).filter((r) => r.rev != null).sort((a, b) => (a.d < b.d ? -1 : 1)).slice(-5)
     .map((r) => ({ p: `Q${Math.ceil(Number(r.d.slice(5, 7)) / 3)} ${r.d.slice(0, 4)}`, rev: r.rev, ni: r.ni ?? null, eps: r.eps ?? null }));
 
-  const eq = lastVal(s, "annualStockholdersEquity"), ni = lastVal(s, "annualNetIncome");
-  const ca = lastVal(s, "annualCurrentAssets"), cl = lastVal(s, "annualCurrentLiabilities");
-  const ebit = lastVal(s, "annualEBIT") ?? lastVal(s, "annualOperatingIncome"), ie = lastVal(s, "annualInterestExpense");
-  // ROIC = EBIT x (1 - aliquota) / capitale investito (Yahoo; in alternativa patrimonio netto + debito totale)
-  const trate = lastVal(s, "annualTaxRateForCalcs"), tdebt = lastVal(s, "annualTotalDebt");
-  const tax = trate != null && trate >= 0 && trate <= 0.5 ? trate : null;
-  const ic = lastVal(s, "annualInvestedCapital") ?? (eq != null && tdebt != null ? eq + tdebt : null);
   const lastDate = (s.annualTotalRevenue || []).slice(-1)[0]?.d || "";
+  const eq = lastVal(s, "annualStockholdersEquity");
+  const [ca,cl] = samePeriod(s,lastDate,"annualCurrentAssets","annualCurrentLiabilities") || [null,null];
+  const roeInputs=samePeriod(s,lastDate,"annualNetIncome","annualStockholdersEquity");
+  const interestInputs=samePeriod(s,lastDate,"annualEBIT","annualInterestExpense")
+    || samePeriod(s,lastDate,"annualOperatingIncome","annualInterestExpense");
+  const roicEbit=(samePeriod(s,lastDate,"annualEBIT") || samePeriod(s,lastDate,"annualOperatingIncome"))?.[0] ?? null;
+  const taxRate=samePeriod(s,lastDate,"annualTaxRateForCalcs")?.[0] ?? null;
+  const tax=taxRate!=null&&taxRate>=0&&taxRate<=0.5?taxRate:null;
+  const investedCapital=samePeriod(s,lastDate,"annualInvestedCapital")?.[0]
+    ?? (samePeriod(s,lastDate,"annualStockholdersEquity","annualTotalDebt")?.reduce((a,b)=>a+b,0) ?? null);
+  const currentRatio=ca!=null&&cl>0?round(ca/cl,2):null;
+  const interestCover=interestInputs&&Math.abs(interestInputs[1])>0?round(interestInputs[0]/Math.abs(interestInputs[1]),1):null;
+  const roe=roeInputs&&roeInputs[1]>0?round(100*roeInputs[0]/roeInputs[1],1):null;
+  const roic=roicEbit!=null&&investedCapital>0&&tax!=null?round(100*roicEbit*(1-tax)/investedCapital,1):null;
   return {
     annual, quarters,
     balance: {
       netDebt: M(lastVal(s, "annualNetDebt")), totalDebt: M(lastVal(s, "annualTotalDebt")), equity: M(eq),
-      currentRatio: ca != null && cl ? round(ca / cl, 2) : null,
-      interestCover: ebit != null && ie ? round(ebit / Math.abs(ie), 1) : null,
-      roe: ni != null && eq > 0 ? round((ni / eq) * 100, 1) : null,
-      roic: ebit != null && ic > 0 && tax != null ? round((ebit * (1 - tax)) / ic * 100, 1) : null,
+      currentRatio, interestCover, roe, roic,
     },
     lastReportDate: lastDate,
     isLatest: lastDate ? (Date.now() - Date.parse(lastDate)) / 864e5 < 560 : false,
