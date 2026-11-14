@@ -5,6 +5,7 @@ import { printReport } from "./report.js";
 import { earningsSurprise, formatEstimatePeriod } from "./modules/earnings-dividends.js";
 import { assessAnalysisReadiness, comparableValuationMetrics } from "./core/analysis-gate.js";
 import V2Console from "./ui/V2Console.jsx";
+import PortfolioConsole from "./ui/PortfolioConsole.jsx";
 import { getApiKey, saveApiKey } from "./services/api-settings.js";
 import { readAnalysisSection, readAnalysisSnapshot, writeAnalysisSection } from "./services/analysis-cache.js";
 import { requestReportCommentary } from "./services/gemini-report.js";
@@ -207,6 +208,7 @@ export default function AnalizzatoreAzionario() {
     m.content = bg;
   }, [dark]);
   const [showV2, setShowV2] = useState(false);
+  const [showPortfolio, setShowPortfolio] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const requestId = useRef(0);
   const [input, setInput] = useState("");
@@ -486,6 +488,8 @@ export default function AnalizzatoreAzionario() {
 
   const cfColor = (n) => (n == null || isNaN(n) ? "" : n > 0 ? "text-emerald-500" : n < 0 ? "text-red-500" : "");
 
+  if (showPortfolio) return <PortfolioConsole dark={dark} onBack={() => setShowPortfolio(false)} onSelectSymbol={(symbol) => { setShowPortfolio(false); setInput(symbol); run(symbol, false, false); }} />;
+
   if (showV2) return <V2Console onSelectSymbol={(symbol) => { setShowV2(false); setInput(symbol); run(symbol, false, false); }} dark={dark} onBack={() => setShowV2(false)} onSettings={() => { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); setShowKey(true); setShowV2(false); }} analysisData={data} />;
 
   return (
@@ -501,6 +505,7 @@ export default function AnalizzatoreAzionario() {
             </div>
           </div>
           <div className="app-actions">
+            <button onClick={() => setShowPortfolio(true)} className="app-action-button app-workspace-button" aria-label="Apri portafoglio"><TrendingUp size={16} /><span>Portafoglio</span></button>
             <button onClick={() => setShowV2(true)} className="app-action-button app-workspace-button" aria-label="Apri watchlist"><TrendingUp size={16} /><span>Watchlist</span></button>
             <button onClick={() => { if (!showKey) { setKeyVal(getApiKey("gemini")); setAvVal(getApiKey("alphavantage")); setFredVal(getApiKey("fred")); } setShowKey(!showKey); }} className="app-action-button" aria-label="Impostazioni fonti dati"><Key size={16} /></button>
             <button onClick={() => { const nd = !dark; setDark(nd); setThemeFixed(true); try { localStorage.setItem("theme", nd ? "dark" : "light"); } catch (e) {} }} className="app-action-button" aria-label="Tema">{dark ? <Sun size={16} /> : <Moon size={16} />}</button>
