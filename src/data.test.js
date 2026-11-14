@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { loadQuote, loadFundamentals, setHttp } from "./data.js";
+import { loadQuote, loadFundamentals, mergeQuoteMarketCap, loadMarketCapFallback, setHttp } from "./data.js";
 
 afterEach(() => {
   setHttp(async () => { throw new Error("HTTP mock non configurato"); });
@@ -68,5 +68,58 @@ describe("fast fundamentals",()=>{
     expect(fin.balance.roic).toBeNull();
     expect(val.peers).toEqual([]);
     expect(calls).toBe(1);
+  });
+});
+
+
+describe("Market capitalization provenance and fallbacks",()=>{
+  const asOf = "2026-11-12";
+  it("takes an available market cap directly from chart metadata",async()=>{
+    setHttp(async(url)=>{
+      if(!url.includes("/v8/finance/chart/TEST"))throw new Error("Unexpected: "+url);
+      return {status:200,data:{chart:{result:[{
+        meta:{symbol:"TEST",currency:"USD",instrumentType:"EQUITY",marketCap:2500000000,regularMarketTime:Math.floor(Date.UTC(2026,10,12,21)/1000)},
+        timestamp:[Math.floor(Date.UTC(2026,10,11,21)/1000),Math.floor(Date.UTC(2026,10,12,21)/1000)],
+        indicators:{quote:[{close:[100,110]}]}
+      }]}}};
+    });
+    const q=await loadQuote("TEST");
+    expect(q.price).toBe(110);
+    expect(q.marketCap).toBe(2500000000);
+    expect(q.marketCapAsOf).toBe(asOf);
+    expect(q.marketCapSource).toContain("Yahoo Finance");
+  });
+  it("joins a recent capitalisation from the already-loaded fundamentals timeseries",()=>{
+    const quote={ticker:"TEST",currency:"USD",asOf,marketCap:null};
+    const val={marketCap:2200000000,marketCapAsOf:"2026-11-11"};
+    expect(mergeQuoteMarketCap(quote,val)).toMatchObject({
+      marketCap:2200000000,marketCapAsOf:"2026-11-11",marketCapCurrency:"USD"
+    });
+  });
+  it("rejects outdated, invalid, or unsupported market caps",()=>{
+    const quote={ticker:"TEST",currency:"USD",asOf,marketCap:null};
+    expect(mergeQuoteMarketCap(quote,{marketCap:2200000000,marketCapAsOf:"2025-12-31"})).toBe(quote);
+    expect(mergeQuoteMarketCap(quote,{marketCap:-20,marketCapAsOf:asOf})).toBe(quote);
+    expect(mergeQuoteMarketCap({...quote,instrumentType:"ETF"},{marketCap:2200000000,marketCapAsOf:asOf}).marketCap).toBeNull();
+    expect(mergeQuoteMarketCap({...quote,marketCap:4000000000},{marketCap:2200000000,marketCapAsOf:asOf}).marketCap).toBe(4000000000);
+  });
+  it("reads the Yahoo quote fallback with a validated ticker, date, and currency",async()=>{
+    setHttp(async(url)=>{
+      if(!url.includes("/v7/finance/quote"))throw new Error("Unexpected: "+url);
+      return {status:200,data:{quoteResponse:{result:[{
+        symbol:"TEST",quoteType:"EQUITY",marketCap:2400000000,currency:"USD",
+        regularMarketTime:Math.floor(Date.UTC(2026,10,12,21)/1000)
+      }]}}};
+    });
+    await expect(loadMarketCapFallback("TEST","USD",asOf)).resolves.toMatchObject({
+      marketCap:2400000000,marketCapAsOf:asOf,marketCapSource:"Yahoo Finance · quote"
+    });
+    await expect(loadMarketCapFallback("TEST","EUR",asOf)).resolves.toBeNull();
+  });
+  it("returns no fallback if Yahoo provides no date or the wrong symbol",async()=>{
+    setHttp(async()=>({status:200,data:{quoteResponse:{result:[{symbol:"OTHER",marketCap:1e9,currency:"USD"}]}}}));
+    await expect(loadMarketCapFallback("TEST","USD",asOf)).resolves.toBeNull();
+    setHttp(async()=>({status:200,data:{quoteResponse:{result:[{symbol:"TEST",marketCap:1e9,currency:"USD"}]}}}));
+    await expect(loadMarketCapFallback("TEST","USD",asOf)).resolves.toBeNull();
   });
 });
