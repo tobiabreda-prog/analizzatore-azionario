@@ -64,3 +64,28 @@ describe("annual statement display metrics",()=>{
     expect(rows[2].g).toBeNull();
   });
 });
+
+
+describe("financial audit: fiscal-year gaps and scoring",()=>{
+ it("uses calendar-year distance, not count of available rows, for CAGR",()=>{
+  const d=dataset(10);
+  d.fin.annual=[
+   {y:2022,rev:100,ni:10,eps:1,ebitda:20,op:10},
+   {y:2024,rev:144,ni:15,eps:2,ebitda:26,op:15}
+  ];
+  const scores=computeScores(d,tech);
+  expect(scores.derived.cagr).toBeCloseTo(20,7);
+  expect(scores.derived.epsG).toBeNull();
+ });
+ it("does not present a two-year gap as annual revenue growth",()=>{
+  const rows=buildAnnualMetrics([{y:2022,rev:100},{y:2024,rev:144}]);
+  expect(rows[1].g).toBeNull();
+ });
+ it("computes one-year growth when both adjacent fiscal years are available",()=>{
+  const d=dataset(10);
+  const result=computeScores(d,tech);
+  expect(result.derived.cagr).toBeCloseTo((1.2**(1/2)-1)*100,7);
+  // last EPS is unavailable: no implied zero EPS growth.
+  expect(result.derived.epsG).toBeNull();
+ });
+});

@@ -178,7 +178,13 @@ const M = (x) => (num(x) == null ? null : round(x / 1e6, 1));
 const ANNUAL_TYPES = ["annualTotalRevenue", "annualNetIncome", "annualEBITDA", "annualGrossProfit", "annualOperatingIncome", "annualDilutedEPS", "annualFreeCashFlow", "annualTotalDebt", "annualNetDebt", "annualStockholdersEquity", "annualCurrentAssets", "annualCurrentLiabilities", "annualInterestExpense", "annualEBIT", "annualTaxRateForCalcs", "annualInvestedCapital"];
 const Q_TYPES = ["quarterlyTotalRevenue", "quarterlyNetIncome", "quarterlyDilutedEPS"];
 
-function buildFin(s) {
+// A ratio is available only if every input belongs to the same fiscal year end.
+function samePeriod(s, periodEnd, ...types) {
+  if (!periodEnd) return null;
+  const items=types.map(type=>(s[type]||[]).find(e=>e.d===periodEnd));
+  return items.every(x=>x&&num(x.v)!=null) ? items.map(x=>x.v) : null;
+}
+export function buildFin(s) {
   const byYear = {};
   const put = (type, key, conv) => (s[type] || []).forEach((e) => { const y = Number(e.d.slice(0, 4)); (byYear[y] = byYear[y] || { y })[key] = conv(e.v); });
   put("annualTotalRevenue", "rev", M); put("annualNetIncome", "ni", M); put("annualEBITDA", "ebitda", M);
@@ -193,22 +199,26 @@ function buildFin(s) {
   const quarters = Object.values(qMap).filter((r) => r.rev != null).sort((a, b) => (a.d < b.d ? -1 : 1)).slice(-5)
     .map((r) => ({ p: `Q${Math.ceil(Number(r.d.slice(5, 7)) / 3)} ${r.d.slice(0, 4)}`, rev: r.rev, ni: r.ni ?? null, eps: r.eps ?? null }));
 
-  const eq = lastVal(s, "annualStockholdersEquity"), ni = lastVal(s, "annualNetIncome");
-  const ca = lastVal(s, "annualCurrentAssets"), cl = lastVal(s, "annualCurrentLiabilities");
-  const ebit = lastVal(s, "annualEBIT") ?? lastVal(s, "annualOperatingIncome"), ie = lastVal(s, "annualInterestExpense");
-  // ROIC = EBIT x (1 - aliquota) / capitale investito (Yahoo; in alternativa patrimonio netto + debito totale)
-  const trate = lastVal(s, "annualTaxRateForCalcs"), tdebt = lastVal(s, "annualTotalDebt");
-  const tax = trate != null && trate >= 0 && trate <= 0.5 ? trate : null;
-  const ic = lastVal(s, "annualInvestedCapital") ?? (eq != null && tdebt != null ? eq + tdebt : null);
   const lastDate = (s.annualTotalRevenue || []).slice(-1)[0]?.d || "";
+  const eq = lastVal(s, "annualStockholdersEquity");
+  const [ca,cl] = samePeriod(s,lastDate,"annualCurrentAssets","annualCurrentLiabilities") || [null,null];
+  const roeInputs=samePeriod(s,lastDate,"annualNetIncome","annualStockholdersEquity");
+  const interestInputs=samePeriod(s,lastDate,"annualEBIT","annualInterestExpense")
+    || samePeriod(s,lastDate,"annualOperatingIncome","annualInterestExpense");
+  const roicEbit=(samePeriod(s,lastDate,"annualEBIT") || samePeriod(s,lastDate,"annualOperatingIncome"))?.[0] ?? null;
+  const taxRate=samePeriod(s,lastDate,"annualTaxRateForCalcs")?.[0] ?? null;
+  const tax=taxRate!=null&&taxRate>=0&&taxRate<=0.5?taxRate:null;
+  const investedCapital=samePeriod(s,lastDate,"annualInvestedCapital")?.[0]
+    ?? (samePeriod(s,lastDate,"annualStockholdersEquity","annualTotalDebt")?.reduce((a,b)=>a+b,0) ?? null);
+  const currentRatio=ca!=null&&cl>0?round(ca/cl,2):null;
+  const interestCover=interestInputs&&Math.abs(interestInputs[1])>0?round(interestInputs[0]/Math.abs(interestInputs[1]),1):null;
+  const roe=roeInputs&&roeInputs[1]>0?round(100*roeInputs[0]/roeInputs[1],1):null;
+  const roic=roicEbit!=null&&investedCapital>0&&tax!=null?round(100*roicEbit*(1-tax)/investedCapital,1):null;
   return {
     annual, quarters,
     balance: {
       netDebt: M(lastVal(s, "annualNetDebt")), totalDebt: M(lastVal(s, "annualTotalDebt")), equity: M(eq),
-      currentRatio: ca != null && cl ? round(ca / cl, 2) : null,
-      interestCover: ebit != null && ie ? round(ebit / Math.abs(ie), 1) : null,
-      roe: ni != null && eq > 0 ? round((ni / eq) * 100, 1) : null,
-      roic: ebit != null && ic > 0 && tax != null ? round((ebit * (1 - tax)) / ic * 100, 1) : null,
+      currentRatio, interestCover, roe, roic,
     },
     lastReportDate: lastDate,
     isLatest: lastDate ? (Date.now() - Date.parse(lastDate)) / 864e5 < 560 : false,
@@ -224,11 +234,19 @@ const median = (a) => { const v = a.filter((x) => x != null && x > 0).sort((x, y
 const isUS = (sym) => !/[.:]/.test(sym);
 
 // Storico: mediana dei valori trimestrali degli ultimi 5 anni, ricavata dalle serie gia' scaricate (nessuna chiamata in piu').
-function histMedian(series) {
-  const lim = Date.now() - 5 * 366 * 864e5;
-  const pts = (series || []).filter((e) => Date.parse(e.d) >= lim && e.v > 0);
-  if (pts.length < 4) return null;
-  return { v: median(pts.map((e) => e.v)), span: (Date.parse(pts[pts.length - 1].d) - Date.parse(pts[0].d)) / (365 * 864e5) };
+export function histMedian(series, now=Date.now()) {
+  const lim=now-5*365.25*864e5;
+  const byDate=new Map();
+  for(const e of Array.isArray(series)?series:[]){
+    const ts=Date.parse(e?.d);
+    if(Number.isFinite(ts)&&ts>=lim&&ts<=now+864e5&&num(e.v)!=null&&e.v>0)byDate.set(e.d,e.v);
+  }
+  const pts=[...byDate].sort((a,b)=>a[0].localeCompare(b[0]));
+  if(pts.length<8)return null;
+  const first=Date.parse(pts[0][0]),last=Date.parse(pts.at(-1)[0]);
+  const span=(last-first)/(365.25*864e5);
+  if(span<4.4||(now-last)>210*864e5)return null;
+  return {v:median(pts.map(p=>p[1])),span,observations:pts.length,asOf:pts.at(-1)[0]};
 }
 
 // Titoli simili per il confronto di settore: Yahoo Finance (fonte non ufficiale).
@@ -545,6 +563,42 @@ const BENCH = {
   ".T": ["^N225", "Nikkei 225"], ".HK": ["^HSI", "Hang Seng"], ".TO": ["^GSPTSE", "S&P/TSX"],
 };
 const benchFor = (symbol) => { const i = symbol.lastIndexOf("."); return BENCH[i >= 0 ? symbol.slice(i).toUpperCase() : ""] || null; };
+// Build relative returns exclusively from the SAME calendar weeks. The
+// Yahoo weekly chart may timestamp a week on Monday while stock bars close Friday.
+const mondayKey=(date)=>{
+  const t=Date.parse(String(date)+"T00:00:00Z");
+  if(!Number.isFinite(t))return null;
+  const d=new Date(t);
+  d.setUTCDate(d.getUTCDate()-(d.getUTCDay()+6)%7);
+  return d.toISOString().slice(0,10);
+};
+export function pairedWeeklyReturns(stockHistory,indexHistory) {
+  const toMap=(rows)=>{
+    const out=new Map();
+    for(const row of Array.isArray(rows)?rows:[]){
+      const date=Array.isArray(row)?row[0]:row?.date;
+      const value=Array.isArray(row)?row[1]:row?.close;
+      const key=mondayKey(date);
+      if(key&&num(value)!=null&&value>0)out.set(key,value);
+    }
+    return out;
+  };
+  const stockMap=toMap(stockHistory),indexMap=toMap(indexHistory);
+  const shared=[...stockMap.keys()].filter(k=>indexMap.has(k)).sort();
+  const latest=shared.at(-1);
+  if(!latest||latest!==[...stockMap.keys()].sort().at(-1)||latest!==[...indexMap.keys()].sort().at(-1))return null;
+  const output={stock:{r13:null,r26:null,r52:null},index:{r13:null,r26:null,r52:null}};
+  let available=0;
+  for(const weeks of [13,26,52]){
+    const past=new Date(Date.parse(latest+"T00:00:00Z")-weeks*7*864e5).toISOString().slice(0,10);
+    if(!stockMap.has(past)||!indexMap.has(past))continue;
+    const key="r"+weeks;
+    output.stock[key]=round((stockMap.get(latest)/stockMap.get(past)-1)*100,1);
+    output.index[key]=round((indexMap.get(latest)/indexMap.get(past)-1)*100,1);
+    available++;
+  }
+  return available?output:null;
+}
 // rendimenti percentuali a 13/26/52 settimane da una serie di chiusure settimanali
 export function weeklyReturns(c) {
   const n = c.length, r = (k) => (n > k && c[n - 1 - k] > 0 ? round((c[n - 1] / c[n - 1 - k] - 1) * 100, 1) : null);
@@ -553,7 +607,7 @@ export function weeklyReturns(c) {
 
 export async function loadMarket(symbol, history) {
   const closes = (history || []).map((h) => h[1]).filter(num);
-  const stock = weeklyReturns(closes);
+  let stock = weeklyReturns(closes);
   const last52 = closes.slice(-52);
   const lo = last52.length ? Math.min(...last52) : null, hi = last52.length ? Math.max(...last52) : null;
   const price = closes[closes.length - 1];
@@ -563,9 +617,16 @@ export async function loadMarket(symbol, history) {
   if (b) {
     try {
       const r = await yget(`/v8/finance/chart/${encodeURIComponent(b[0])}`, { range: "2y", interval: "1wk", includePrePost: "false" });
-      const q = r.data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
-      const c = q.filter(num);
-      if (r.status === 200 && c.length > 14) index = weeklyReturns(c);
+      const result=r.data?.chart?.result?.[0];
+      const timestamps=result?.timestamp||[];
+      const prices=result?.indicators?.quote?.[0]?.close||[];
+      const benchmark=timestamps.map((ts,i)=>[isoDate(ts,result?.meta?.gmtoffset||0),num(prices[i])])
+        .filter(row=>row[1]!=null&&row[1]>0);
+      const paired=pairedWeeklyReturns(history,benchmark);
+      if(r.status===200&&paired){
+        index=paired.index;
+        stock=paired.stock;
+      }
     } catch (e) { /* indice non disponibile */ }
   }
   return { bench: b && index ? { symbol: b[0], name: b[1] } : null, stock, index, pos52 };

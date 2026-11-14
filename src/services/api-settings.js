@@ -33,9 +33,9 @@ export function saveApiKey(provider, value) {
   else delete settings[key];
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    // Mantiene la compatibilità con le parti dell'app e le versioni precedenti.
-    if (normalized) localStorage.setItem(LEGACY_KEYS[key], normalized);
-    else localStorage.removeItem(LEGACY_KEYS[key]);
+    // L'accesso in lettura resta compatibile con le chiavi legacy, ma i nuovi
+    // salvataggi non duplicano le credenziali in più voci di localStorage.
+    localStorage.removeItem(LEGACY_KEYS[key]);
   } catch {
     throw new Error("Impossibile salvare la chiave API nella memoria locale del dispositivo.");
   }
