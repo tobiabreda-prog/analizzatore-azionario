@@ -16,14 +16,14 @@ afterEach(()=>{if(original===undefined)delete globalThis.localStorage;else globa
 describe("sectional analysis cache",()=>{
  it("preserves market data independently from failed AI analysis",()=>{
   expect(writeAnalysisSection("aapl","quote",{ticker:"AAPL",price:200},{now:1_000_000})).toBe(true);
-  expect(writeAnalysisSection("aapl","fin",{annual:[{y:2025,fcf:1}]},{now:1_000_000})).toBe(true);
+  expect(writeAnalysisSection("aapl","fin",{schemaVersion:2,annual:[{y:2025,periodEnd:"2025-12-31",fcf:1}]},{now:1_000_000})).toBe(true);
   expect(readAnalysisSection("AAPL","quote",{now:1_001_000}).value.price).toBe(200);
   expect(readAnalysisSnapshot("AAPL",{now:1_001_000}).fresh).toEqual(["quote","fin"]);
  });
  it("expires quotes independently of statements and safely exposes old data",()=>{
   const now=10_000_000;
   writeAnalysisSection("ENI.MI","quote",{price:20},{now});
-  writeAnalysisSection("ENI.MI","fin",{annual:[]},{now});
+  writeAnalysisSection("ENI.MI","fin",{schemaVersion:2,annual:[]},{now});
   const later=now+ANALYSIS_TTL.quote+1;
   expect(readAnalysisSection("ENI.MI","quote",{now:later})).toBeNull();
   expect(readAnalysisSection("ENI.MI","quote",{allowStale:true,now:later}).stale).toBe(true);
@@ -45,5 +45,15 @@ describe("sectional analysis cache",()=>{
   globalThis.localStorage={getItem:()=>{throw new Error("disabled");},setItem:()=>{throw new Error("disabled");}};
   expect(readAnalysisSection("AAPL","quote")).toBeNull();
   expect(writeAnalysisSection("AAPL","quote",{})).toBe(false);
+ });
+ it("refetches legacy financial joins while preserving quotes and watchlists",()=>{
+  const now=1_000_000;
+  localStorage.setItem("aa2_fair_value_watchlist_v1",JSON.stringify(["AAPL"]));
+  writeAnalysisSection("AAPL","quote",{price:200},{now});
+  writeAnalysisSection("AAPL","fin",{annual:[{y:2025,rev:100,ni:10}]},{now});
+  expect(readAnalysisSection("AAPL","fin",{now})).toBeNull();
+  expect(readAnalysisSection("AAPL","fin",{now,allowStale:true})).toBeNull();
+  expect(readAnalysisSnapshot("AAPL",{now}).data).toEqual({quote:{price:200}});
+  expect(JSON.parse(localStorage.getItem("aa2_fair_value_watchlist_v1"))).toEqual(["AAPL"]);
  });
 });

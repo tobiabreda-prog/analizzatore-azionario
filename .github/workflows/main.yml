@@ -56,7 +56,11 @@ jobs:
 
       - name: Installa dipendenze
         working-directory: ${{ env.APP_DIR }}
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
+
+      - name: Test unitari
+        working-directory: ${{ env.APP_DIR }}
+        run: npm test
 
       - name: Build web
         working-directory: ${{ env.APP_DIR }}

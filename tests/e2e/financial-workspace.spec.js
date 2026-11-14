@@ -61,7 +61,7 @@ test("existing watchlist symbols survive the upgrade and link to the primary rep
     const today=new Date().toISOString().slice(0,10);
     const quote={ticker:"AAPL",name:"Apple test fixture",currency:"USD",price:200,marketCap:100000000000,source:"Fixture",asOf:today,
       history:Array.from({length:60},(_,i)=>[new Date(now-(59-i)*7*86400000).toISOString().slice(0,10),150+i,100000])};
-    const fin={annual,quarters:[],balance:{netDebt:500,currentRatio:2,interestCover:8,roe:10},lastReportDate:"2025-12-31",isLatest:true,asOf:today,source:"Fixture"};
+    const fin={schemaVersion:2,annual:annual.map(r=>({...r,periodEnd:r.y+"-12-31"})),quarters:[],balance:{netDebt:500,currentRatio:2,interestCover:8,roe:10},lastReportDate:"2025-12-31",isLatest:true,asOf:today,source:"Fixture"};
     const val={metrics:[],peers:[],source:"Fixture",asOf:today};
     // Legacy storage key intentionally preserved to avoid losing installed watchlists.
     localStorage.setItem("aa2_fair_value_watchlist_v1",JSON.stringify(["AAPL"]));

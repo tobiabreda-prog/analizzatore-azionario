@@ -9,9 +9,12 @@ COME OTTENERE L'APK (senza installare nulla sul PC)
 6. Nell'app tocca l'icona della chiave e inserisci una chiave Gemini da Google AI Studio. Usa un progetto SENZA fatturazione collegata: l'app usa solo gemini-3.5-flash-lite e non attiva Search grounding.
 7. Alpha Vantage è facoltativo: la chiave gratuita consente fino a 25 richieste/giorno; la cache locale evita chiamate ripetute. FRED richiede una chiave API gratuita; ECB non richiede chiave. Yahoo Finance non richiede chiave ma usa endpoint non ufficiali.
 
-In alternativa, con Android Studio + JDK 17:  npm install && npm run build && npx cap add android && npx cap sync android && node scripts/generate-android-icons.mjs
+In alternativa, con Android Studio + JDK 17:  npm ci && npm run build && npx cap add android && npx cap sync android && node scripts/generate-android-icons.mjs
 poi Build > Build APK(s) in Android Studio.
 
-TEST: npm install && npm test  (la build dell'APK esegue i test e si ferma se falliscono).
-STRUTTURA: src/scoring.js (punteggi, etichetta, livelli), src/fundamentals.js, src/analysts.js,
-src/providers/ (Alpha Vantage, FRED, ECB, SEC adapter; Yahoo Finance in src/data.js), src/lib/ (utilita', indicatori, formati), tests/.
+TEST: npm ci && npm test  (la build dell'APK esegue i test e si ferma se falliscono).
+TEST BROWSER: npx playwright install chromium && npm run test:e2e.
+STRUTTURA: src/App.jsx (interfaccia e punteggi), src/data.js (Yahoo Finance e normalizzazione),
+src/core/ (gate e periodi fiscali), src/ai/report-commentary.js (validazione commenti AI),
+src/services/ (Gemini e cache), src/providers/ (adapter), src/modules/ (calcoli), tests/e2e/.
+CORREZIONI AFFIDABILITA': docs/RELIABILITY-FIXES.md.

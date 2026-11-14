@@ -24,7 +24,9 @@ jobs:
           distribution: temurin
           java-version: "17"
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
+      - name: Unit tests
+        run: npm test
       - name: Build web app
         run: npm run build
       - name: Add Android platform

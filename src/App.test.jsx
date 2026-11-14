@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAnnualMetrics, computeScores } from "./App.jsx";
+import { buildAnnualMetrics, computeScores, buildReportRequest } from "./App.jsx";
 
 function history(count=60){
   return Array.from({length:count},(_,i)=>{
@@ -67,6 +67,27 @@ describe("annual statement display metrics",()=>{
 
 
 describe("financial audit: fiscal-year gaps and scoring",()=>{
+ it("does not report an annual EPS/revenue growth across a short fiscal transition",()=>{
+  const d=dataset(10);
+  d.fin.annual=[
+   {y:2024,periodEnd:"2024-12-31",rev:100,ni:10,eps:1},
+   {y:2025,periodEnd:"2025-06-30",rev:110,ni:12,eps:1.2}
+  ];
+  const result=computeScores(d,tech);
+  expect(result.derived.epsG).toBeNull();
+  expect(buildAnnualMetrics(d.fin.annual)[1].g).toBeNull();
+  const years=(Date.parse("2025-06-30")-Date.parse("2024-12-31"))/(365.25*86400000);
+  expect(result.derived.cagr).toBeCloseTo((1.1**(1/years)-1)*100,7);
+ });
+ it("keeps separate fiscal ends in chronological order within the same year",()=>{
+  const rows=buildAnnualMetrics([{y:2025,periodEnd:"2025-12-31",rev:120},{y:2025,periodEnd:"2025-06-30",rev:100}]);
+  expect(rows.map(r=>r.periodLabel)).toEqual(["2025-06-30","2025-12-31"]);
+  expect(rows[1].g).toBeNull();
+ });
+ it("does not infer a -100% CAGR from an absent latest revenue",()=>{
+  const d=dataset(10);d.fin.annual.at(-1).rev=null;
+  expect(computeScores(d,tech).derived.cagr).toBeNull();
+ });
  it("uses calendar-year distance, not count of available rows, for CAGR",()=>{
   const d=dataset(10);
   d.fin.annual=[
@@ -88,4 +109,60 @@ describe("financial audit: fiscal-year gaps and scoring",()=>{
   // last EPS is unavailable: no implied zero EPS growth.
   expect(result.derived.epsG).toBeNull();
  });
+});
+
+describe("verified commentary inputs",()=>{
+ it("sends only eligible multiples and validates against the exact rounded facts sent",()=>{
+  const d=dataset(10),today=new Date().toISOString().slice(0,10);
+  d.quote.price=143.12345;
+  d.val.metrics=[{k:"P/E",v:20,sector:18,date:today},{k:"P/S",v:999,sector:10,date:"2020-01-01"}];
+  const request=buildReportRequest(d,computeScores(d,tech),"MANTENERE");
+  expect(request.verifiedFacts.multipli).toEqual([{nome:"P/E",valore:20,settore:18,data:today}]);
+  expect(request.verifiedFacts.prezzo.p).toBe(143.12);
+  expect(request.userPrompt).toContain(JSON.stringify(request.verifiedFacts));
+  expect(request.userPrompt).not.toContain("999");
+ });
+});
+
+describe("valuation score freshness", () => {
+  const now = new Date("2026-11-13T12:00:00Z");
+  const current = { k: "P/E", v: 20, sector: 20, date: "2026-11-12" };
+
+  it("does not inflate the score with a stale cheap multiple while the gate remains ready", () => {
+    const input = dataset(10);
+    input.val.metrics = [current];
+    const baseline = computeScores(input, tech, { now });
+    input.val.metrics.push({ k: "P/S", v: 1, sector: 10, date: "2020-01-01" });
+    const result = computeScores(input, tech, { now });
+    expect(result.readiness.ready).toBe(true);
+    expect(result.readiness.coverage.comparableMultiples).toBe(1);
+    expect(result.scores.Valutazione).toBe(50);
+    expect(result.overall).toBe(baseline.overall);
+  });
+
+  it("does not score malformed, future, unsupported or nonpositive observations", () => {
+    const input = dataset(10);
+    input.val.metrics = [
+      current,
+      null,
+      { ...current, k: "P/S", v: 1, sector: 10, date: "2026-11-20" },
+      { ...current, k: "P/S", v: 1, sector: 10, date: "2026-02-30" },
+      { ...current, k: "unknown", v: 1, sector: 10 },
+      { ...current, v: Infinity },
+      { ...current, v: 0 },
+      { ...current, v: -1 }
+    ];
+    const result = computeScores(input, tech, { now });
+    expect(result.scores.Valutazione).toBe(50);
+    expect(result.readiness.coverage.comparableMultiples).toBe(1);
+  });
+
+  it("keeps both the valuation factor and overall unavailable for stale-only metrics", () => {
+    const input = dataset(10);
+    input.val.metrics = [{ ...current, date: "2020-01-01" }];
+    const result = computeScores(input, tech, { now });
+    expect(result.scores.Valutazione).toBeNull();
+    expect(result.overall).toBeNull();
+    expect(result.readiness.ready).toBe(false);
+  });
 });

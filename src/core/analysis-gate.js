@@ -1,6 +1,7 @@
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
 const FACTORS = ["Trend tecnico", "Crescita", "Redditività", "Solidità finanziaria", "Valutazione", "Sentiment"];
 const REQUIRED = ["Trend tecnico", "Crescita", "Redditività", "Valutazione"];
+const VALUATION_METRICS = new Set(["P/E", "P/E forward", "PEG", "P/B", "P/S", "EV/EBITDA", "P/FCF"]);
 
 function validIsoDate(value) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -11,6 +12,18 @@ function validIsoDate(value) {
 function ageDays(date, now) {
   if (!validIsoDate(date) || !(now instanceof Date) || !Number.isFinite(now.getTime())) return null;
   return (now.getTime() - Date.parse(date + "T23:59:59Z")) / 86400000;
+}
+
+// The score and readiness gate must use the same dated, usable observations.
+// A recent metric does not make other stale or malformed metrics usable.
+export function comparableValuationMetrics(metrics, now = new Date()) {
+  return (Array.isArray(metrics) ? metrics : []).filter((metric) => {
+    const metricAge = ageDays(metric?.date, now);
+    const hasReference = (finite(metric?.sector) && metric.sector > 0) ||
+      (finite(metric?.hist5y) && metric.hist5y > 0);
+    return VALUATION_METRICS.has(metric?.k) && finite(metric?.v) && metric.v > 0 && hasReference &&
+      metricAge != null && metricAge >= -1 && metricAge <= 45;
+  });
 }
 
 /**
@@ -71,14 +84,7 @@ export function assessAnalysisReadiness({ quote, fin, val, scores = {}, sector =
   if (!val?.source || val.source === "n.d." || valuationAge == null || valuationAge < -1 || valuationAge > 7) {
     reasons.push("Fonte o data dei multipli assente/non aggiornata");
   }
-  const metrics = Array.isArray(val?.metrics) ? val.metrics : [];
-  const comparable = metrics.filter((metric) => {
-    const metricAge = ageDays(metric?.date, now);
-    const hasReference = (finite(metric?.sector) && metric.sector > 0) ||
-      (finite(metric?.hist5y) && metric.hist5y > 0);
-    return finite(metric?.v) && metric.v > 0 && hasReference &&
-      metricAge != null && metricAge >= -1 && metricAge <= 45;
-  });
+  const comparable = comparableValuationMetrics(val?.metrics, now);
   if (!comparable.length) {
     reasons.push("Valutazione senza multipli confrontabili aggiornati (osservazione oltre 45 giorni o data assente)");
   }

@@ -1,0 +1,23 @@
+# Dependencies and generated web/test output
+node_modules/
+dist/
+test-results/
+playwright-report/
+blob-report/
+coverage/
+
+# Capacitor regenerates this project during the Android build
+/android/
+
+# Local settings, credentials and signing material
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+*.p12
+*.pfx
+key.properties
+local.properties
+.DS_Store
+npm-debug.log*

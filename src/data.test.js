@@ -180,6 +180,50 @@ describe("GOOGL earnings and dividend intelligence",()=>{
 describe("fundamental data consistency and historical comparisons",()=>{
  const point=(d,v)=>({d,v});
  const series=(...pts)=>pts.map(([d,v])=>point(d,v));
+ it("does not merge annual revenue and income from different fiscal ends in the same calendar year",()=>{
+  const result=buildFin({
+   annualTotalRevenue:series(["2025-12-31",100000000]),
+   annualNetIncome:series(["2025-06-30",10000000]),
+   annualGrossProfit:series(["2025-12-31",0]),
+   annualDilutedEPS:series(["2025-06-30",2])
+  });
+  expect(result.annual).toEqual([{y:2025,periodEnd:"2025-12-31",rev:100,ni:null,ebitda:null,gp:0,op:null,eps:null,fcf:null}]);
+ });
+ it("retains both fiscal ends after a reporting-year change and uses the latest dated revenue",()=>{
+  const result=buildFin({
+   annualTotalRevenue:series(["2025-12-31",120000000],["2025-06-30",100000000]),
+   annualNetIncome:series(["2025-06-30",10000000],["2025-12-31",12000000]),
+   annualStockholdersEquity:series(["2025-06-30",50000000],["2025-12-31",60000000])
+  });
+  expect(result.annual.map(row=>[row.periodEnd,row.rev,row.ni])).toEqual([
+   ["2025-06-30",100,10],["2025-12-31",120,12]
+  ]);
+  expect(result.lastReportDate).toBe("2025-12-31");
+  expect(result.balance).toMatchObject({periodEnd:"2025-12-31",equity:60,roe:20});
+ });
+ it("does not borrow debt or equity from a different fiscal end for the latest annual row",()=>{
+  const s={
+   annualTotalRevenue:series(["2025-12-31",100000000]),
+   annualEBITDA:series(["2025-12-31",20000000]),
+   annualNetDebt:series(["2025-06-30",30000000]),
+   annualTotalDebt:series(["2025-06-30",40000000]),
+   annualStockholdersEquity:series(["2026-03-31",50000000])
+  };
+  expect(buildFin(s).balance).toMatchObject({netDebt:null,totalDebt:null,equity:null});
+  s.annualNetDebt.push(point("2025-12-31",25000000));
+  s.annualTotalDebt.push(point("2025-12-31",35000000));
+  s.annualStockholdersEquity.push(point("2025-12-31",45000000));
+  expect(buildFin(s).balance).toMatchObject({netDebt:25,totalDebt:35,equity:45});
+ });
+ it("retains the exact quarterly end and ignores malformed annual dates",()=>{
+  const result=buildFin({
+   annualTotalRevenue:series(["2025-02-29",100000000],["2025-12-31",120000000]),
+   quarterlyTotalRevenue:series(["2026-03-31",30000000]),
+   quarterlyNetIncome:series(["2026-02-28",5000000])
+  });
+  expect(result.annual.map(row=>row.periodEnd)).toEqual(["2025-12-31"]);
+  expect(result.quarters).toEqual([{p:"Q1 2026",periodEnd:"2026-03-31",rev:30,ni:null,eps:null}]);
+ });
  it("rejects four recent valuation observations masquerading as five years",()=>{
   const v=series(["2026-01-01",20],["2026-04-01",22],["2026-07-01",25],["2026-10-01",24]);
   expect(histMedian(v,Date.parse("2026-11-14T12:00:00Z"))).toBeNull();

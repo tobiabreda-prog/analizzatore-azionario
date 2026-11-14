@@ -3,11 +3,13 @@ import { ComposedChart, LineChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, L
 import { loadQuote, loadFundamentals, loadAnalysts, loadMarket, loadNewsRaw, loadCorporateEvents, loadPeerValuation, mergeQuoteMarketCap, loadMarketCapFallback, diagnostics } from "./data.js";
 import { printReport } from "./report.js";
 import { earningsSurprise, formatEstimatePeriod } from "./modules/earnings-dividends.js";
-import { assessAnalysisReadiness } from "./core/analysis-gate.js";
+import { assessAnalysisReadiness, comparableValuationMetrics } from "./core/analysis-gate.js";
 import V2Console from "./ui/V2Console.jsx";
 import { getApiKey, saveApiKey } from "./services/api-settings.js";
-import { readAnalysisSection, readAnalysisSnapshot, writeAnalysisSection, analysisFingerprint } from "./services/analysis-cache.js";
-import { listGeminiModels, approvedReportModels } from "./services/gemini-models.js";
+import { readAnalysisSection, readAnalysisSnapshot, writeAnalysisSection } from "./services/analysis-cache.js";
+import { requestReportCommentary } from "./services/gemini-report.js";
+import { COMMENTARY_VERSION, validateReportCommentary } from "./ai/report-commentary.js";
+import { compareAnnualPeriods, annualPeriodYears, isComparableAnnualPeriod } from "./core/fiscal-periods.js";
 import { Search, RefreshCw, Sun, Moon, AlertTriangle, TrendingUp, TrendingDown, Clock, Loader2, Info, CheckCircle2, Key, Printer } from "lucide-react";
 
 const POPULAR_TICKERS = [
@@ -26,47 +28,6 @@ const POPULAR_TICKERS = [
   { ticker: "ENEL.MI", name: "Enel S.p.A." }
 ];
 
-function parseJSON(txt) {
-  try {
-    const c = txt.replace(/```json|```/g, "").trim();
-    const a = c.indexOf("{"), b = c.lastIndexOf("}");
-    return JSON.parse(c.slice(a, b + 1));
-  } catch (e) { return null; }
-}
-
-async function callGeminiAPI(systemInstruction,userPrompt) {
-  const apiKey=getApiKey("gemini");
-  if(!apiKey)throw new Error("Chiave Gemini mancante: inseriscila nelle impostazioni.");
-  const models=approvedReportModels(await listGeminiModels(apiKey));
-  if(!models.length)throw new Error("gemini-3.5-flash-lite non disponibile per la chiave. Nessun passaggio automatico a modelli alternativi.");
-  const payload={
-    contents:[{role:"user",parts:[{text:userPrompt}]}],
-    systemInstruction:{parts:[{text:systemInstruction}]},
-    generationConfig:{responseMimeType:"application/json",temperature:0.3,maxOutputTokens:3072}
-  };
-  let lastError="Nessun modello compatibile.";
-  for(const model of models){
-    const url="https://generativelanguage.googleapis.com/v1beta/"+model.name+":generateContent";
-    let response;
-    try {
-      response=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":apiKey},body:JSON.stringify(payload)});
-    }catch(e){throw new Error("Rete Gemini non raggiungibile: "+String(e.message||e));}
-    if(response.status===429)throw new Error("Quota Gemini esaurita (429): il report numerico rimane disponibile; riprova più tardi.");
-    if(!response.ok){
-      const detail=await response.json().catch(()=>({}));
-      lastError=model.name+": HTTP "+response.status+" "+String(detail.error?.message||"").slice(0,160);
-      if(response.status===400||response.status===404)continue;
-      throw new Error(lastError);
-    }
-    const answer=await response.json();
-    const text=(answer.candidates?.[0]?.content?.parts||[]).map(p=>p.text||"").join("");
-    const parsed=parseJSON(text);
-    if(!parsed)throw new Error("JSON Gemini non interpretabile: report numerico non modificato.");
-    return parsed;
-  }
-  throw new Error("Nessun modello Gemini utilizzabile: "+lastError);
-}
-
 const nf = (n, d = 2) => (n == null || isNaN(n) ? "n.d." : Number(n).toLocaleString("it-IT", { minimumFractionDigits: d, maximumFractionDigits: d }));
 const cf = (n) => (n == null || isNaN(n) ? "n.d." : Number(n).toLocaleString("it-IT", { notation: "compact", maximumFractionDigits: 2 }));
 const pf = (n) => (n == null || isNaN(n) ? "n.d." : (n > 0 ? "+" : "") + nf(n) + "%");
@@ -78,16 +39,17 @@ const daysOld = (d) => { const t = Date.parse(d); return isNaN(t) ? null : (Date
 export function buildAnnualMetrics(rows = []) {
   return (Array.isArray(rows) ? rows : [])
     .slice()
-    .sort((a, b) => a.y - b.y)
+    .sort(compareAnnualPeriods)
     .map((row, index, sorted) => {
       const revenue = num(row?.rev);
       const previousRevenue = index > 0 ? num(sorted[index - 1]?.rev) : null;
       return {
         ...row,
+        periodLabel: row.periodEnd || row.y,
         gm: revenue > 0 && num(row?.gp) != null ? (row.gp / revenue) * 100 : null,
         om: revenue > 0 && num(row?.op) != null ? (row.op / revenue) * 100 : null,
         nm: revenue > 0 && num(row?.ni) != null ? (row.ni / revenue) * 100 : null,
-        g: revenue > 0 && previousRevenue > 0 && row.y === sorted[index - 1]?.y + 1 ? (revenue / previousRevenue - 1) * 100 : null
+        g: revenue > 0 && previousRevenue > 0 && isComparableAnnualPeriod(sorted[index - 1], row) ? (revenue / previousRevenue - 1) * 100 : null
       };
     });
 }
@@ -116,15 +78,16 @@ export function buildTech(q) {
   return rows.slice(-52);
 }
 
-export function computeScores(D, tech) {
+export function computeScores(D, tech, { now = new Date() } = {}) {
   const q = D.quote, f = D.fin, v = D.val, a = D.an;
   const last = tech[tech.length - 1];
   const s50 = num(q?.sma50) ?? last?.s50, s200 = num(q?.sma200) ?? last?.s200, p = num(q?.price);
   const rs = num(q?.rsi14) ?? last?.rsi;
   const tS = q ? avg([p != null && s200 != null ? (p > s200 ? 100 : 0) : null, p != null && s50 != null ? (p > s50 ? 100 : 0) : null, rs != null ? clamp(100 - Math.abs(rs - 55) * 3) : null, last && num(last.hist) != null ? (last.hist > 0 ? 100 : 25) : null]) : null;
-  const an = (f?.annual || []).slice().sort((x, y) => x.y - y.y), la = an[an.length - 1], fa = an[0], pa = an[an.length - 2];
-  const cagr = la && fa && Number.isInteger(la.y) && Number.isInteger(fa.y) && la.y > fa.y && num(fa.rev) > 0 && num(la.rev) >= 0 ? (Math.pow(la.rev / fa.rev, 1 / (la.y - fa.y)) - 1) * 100 : null;
-  const epsG = la && pa && la.y === pa.y + 1 && num(la.eps) != null && num(pa.eps) > 0 ? (la.eps / pa.eps - 1) * 100 : null;
+  const an = (f?.annual || []).slice().sort(compareAnnualPeriods), la = an[an.length - 1], fa = an[0], pa = an[an.length - 2];
+  const years = annualPeriodYears(fa, la);
+  const cagr = years > 0 && num(fa?.rev) > 0 && num(la?.rev) != null && la.rev >= 0 ? (Math.pow(la.rev / fa.rev, 1 / years) - 1) * 100 : null;
+  const epsG = la && pa && isComparableAnnualPeriod(pa, la) && num(la.eps) != null && num(pa.eps) > 0 ? (la.eps / pa.eps - 1) * 100 : null;
   const gS = avg([sc(cagr, -5, 15), sc(epsG, -10, 20)]);
   const b = f?.balance || {};
   // Non trasformare NI/EBIT mancanti in margini pari a zero: zero è un dato, null è assenza.
@@ -136,7 +99,7 @@ export function computeScores(D, tech) {
   // Valutazione: per ogni multiplo si confronta con settore e storico 5a (media dei due se ci sono entrambi).
   // Scala logaritmica: rapporto 1 = 50 punti, 0,4x = 100, 2,5x o piu' = 0 (prima 1,5x gia' dava 0 e i titoli "premium" restavano sempre a zero).
   const ratioScore = (r) => (r > 0 ? clamp(50 - (50 * Math.log(r)) / Math.log(2.5)) : null);
-  const vS = avg((v?.metrics || []).filter((m) => ["P/E", "P/E forward", "PEG", "P/B", "P/S", "EV/EBITDA", "P/FCF"].includes(m.k) && num(m.v) > 0).map((m) => avg([num(m.sector) > 0 ? ratioScore(m.v / m.sector) : null, num(m.hist5y) > 0 ? ratioScore(m.v / m.hist5y) : null])));
+  const vS = avg(comparableValuationMetrics(v?.metrics, now).map((m) => avg([num(m.sector) > 0 ? ratioScore(m.v / m.sector) : null, num(m.hist5y) > 0 ? ratioScore(m.v / m.hist5y) : null])));
   const up = a && p && num(a.targetMean) ? (a.targetMean / p - 1) * 100 : null;
   const tot = a?.ratings ? a.ratings.buy + a.ratings.hold + a.ratings.sell : 0;
   const m = D.mkt;
@@ -151,7 +114,7 @@ export function computeScores(D, tech) {
   const scores = { "Trend tecnico": tS, Crescita: gS, Redditività: rS, "Solidità finanziaria": sS, Valutazione: vS, Sentiment: seS };
   let wsum = 0, tot2 = 0;
   Object.entries(scores).forEach(([k, s]) => { if (s != null) { wsum += WEIGHTS[k]; tot2 += s * WEIGHTS[k]; } });
-  const readiness = assessAnalysisReadiness({ quote: q, fin: f, val: v, scores, sector: a?.sector, industry: a?.industry });
+  const readiness = assessAnalysisReadiness({ quote: q, fin: f, val: v, scores, sector: a?.sector, industry: a?.industry, now });
   const overall = readiness.ready && wsum ? tot2 / wsum : null;
   let rel = readiness.ready ? (Object.values(scores).filter((x) => x != null).length / 6) * 100 : 0;
   const stale = daysOld(q?.asOf) > 2 || f?.isLatest === false;
@@ -177,10 +140,10 @@ const EMPTY_FIN = () => ({ annual: [], quarters: [], balance: {}, lastReportDate
 const EMPTY_VAL = () => ({ metrics: [], peers: [], asOf: TODAY(), source: "n.d." });
 const EMPTY_AN = () => ({ targetMean: null, targetMin: null, targetMax: null, ratings: { buy: 0, hold: 0, sell: 0 }, nAnalysts: 0, asOf: TODAY(), source: "n.d." });
 
-const SYSTEM_PROMPT = "Sei un analista finanziario prudente. Usa SOLO i dati forniti: i campi assenti non sono disponibili, non inventarli e segnala la mancanza. L’etichetta indicata è già decisa: motivala senza contraddirla. Non suggerire livelli di ingresso, stop o target. Scrivi in italiano. Rispondi solo con JSON valido.";
+const SYSTEM_PROMPT = "Sei un analista finanziario prudente. Usa SOLO i dati forniti: i campi assenti non sono disponibili, non inventarli e segnala la mancanza. L’etichetta indicata è già decisa: motivala senza contraddirla. Non suggerire livelli di ingresso, stop o target. Non calcolare nuovi numeri; riporta i valori forniti senza cambiarne unità. Usa formato numerico italiano e orizzonte convenzionale 6-12 mesi. Scrivi in italiano. Rispondi solo con JSON valido.";
 const OUTPUT_SCHEMA = '{"horizon":"es. 6-12 mesi","motivation":"4-6 frasi con numeri dai dati","strengths":["max 12 parole","",""],"risks":["max 12 parole",""],"news":{"tone":"1 frase sul tono delle notizie","risks":["max 2 rischi emersi dalle notizie"],"items":[{"i":0,"t":"titolo tradotto in italiano","s":"pos|neu|neg"}]}}';
 
-function buildUserPrompt(acc, S, label) {
+export function buildReportRequest(acc, S, label) {
   const q = acc.quote, f = acc.fin || {}, v = acc.val || {}, a = acc.an || {};
   const d = {
     titolo: `${q.name} (${q.ticker}) ${q.currency || ""}`.trim(),
@@ -189,17 +152,21 @@ function buildUserPrompt(acc, S, label) {
     punteggio: S.overall,
     punteggi: S.scores,
     prezzo: { p: q.price, var: q.changePct, sma50: q.sma50, sma200: q.sma200, rsi: q.rsi14, sup: (q.support || []).filter((x) => x != null), res: (q.resistance || []).filter((x) => x != null), cap: q.marketCap },
-    annuali: (f.annual || []).slice(-4).map((r) => ({ y: r.y, rev: r.rev, ni: r.ni, ebitda: r.ebitda, fcf: r.fcf, eps: r.eps })),
+    annuali: (f.annual || []).slice(-4).map((r) => ({ y: r.y, periodEnd: r.periodEnd, rev: r.rev, ni: r.ni, ebitda: r.ebitda, fcf: r.fcf, eps: r.eps })),
     trimestri: (f.quarters || []).slice(-4),
     bilancio: f.balance,
-    multipli: (v.metrics || []).map((m) => `${m.k} ${m.v}${m.sector != null ? ` (settore ${m.sector})` : ""}${m.hist5y != null ? ` (storico 5a ${m.hist5y})` : ""}`),
+    multipli: comparableValuationMetrics(v.metrics).map(m => ({ nome: m.k, valore: m.v, settore: num(m.sector) > 0 ? m.sector : undefined, storico5a: num(m.hist5y) > 0 ? m.hist5y : undefined, data: m.date })),
     analisti: a.nAnalysts || a.targetMean ? { tgt: a.targetMean, min: a.targetMin, max: a.targetMax, ...a.ratings } : undefined,
     mercato: acc.mkt ? { indice: acc.mkt.bench?.name, titolo: acc.mkt.stock, rispettoIndice: acc.mkt.index, posizione52sett: acc.mkt.pos52 } : undefined,
     indicatori: S.derived,
     notizie: (acc.newsRaw || []).map((r, i) => `${i}|${r.date}|${r.title}`),
   };
   const json = JSON.stringify(d, (k, x) => (x === null || x === undefined || (Array.isArray(x) && !x.length) ? undefined : typeof x === "number" ? Math.round(x * 100) / 100 : x));
-  return `Dati (campi mancanti = non disponibili):\n${json}\n\nIn "news.items" inserisci una voce per ogni notizia (stesso indice i; titolo tradotto in italiano; s = sentiment per un azionista). Se non ci sono notizie ometti "news". Schema:\n${OUTPUT_SCHEMA}`;
+  return {
+    systemInstruction: SYSTEM_PROMPT,
+    verifiedFacts: JSON.parse(json),
+    userPrompt: `Dati (campi mancanti = non disponibili):\n${json}\n\nIn "news.items" inserisci una voce per ogni notizia (stesso indice i; titolo tradotto in italiano; s = sentiment per un azionista). Se non ci sono notizie ometti "news". Schema:\n${OUTPUT_SCHEMA}`
+  };
 }
 
 function mergeNews(acc, nw) {
@@ -412,21 +379,25 @@ export default function AnalizzatoreAzionario() {
         warn("readiness","Giudizio AI sospeso: copertura o qualità dei dati insufficiente.");
         publish();return;
       }
-      const fingerprint=analysisFingerprint(acc);
+      const request=buildReportRequest(acc,S,labelOf(S.overall));
+      const fingerprint=JSON.stringify(request.verifiedFacts);
+      const applyCommentary=(out)=>{
+        const {news,...commentary}=out;
+        acc.final=commentary;acc.news=mergeNews(acc,news);
+      };
       const saved=!force?readAnalysisSection(sym,"ai"):null;
-      if(saved?.value?.fingerprint===fingerprint){
-        const {entry,stop,target,...cachedCommentary}=saved.value.final || {};
-        acc.final=cachedCommentary;acc.news=saved.value.news;publish();return;
+      if(saved?.value?.version===COMMENTARY_VERSION && saved.value.fingerprint===fingerprint){
+        try {
+          applyCommentary(validateReportCommentary(saved.value.report,request.verifiedFacts));
+          publish();return;
+        }catch { /* Discard invalid cached output and request a validated replacement. */ }
       }
       setAiBusy(true);
       try {
-        const out=await callGeminiAPI(SYSTEM_PROMPT,buildUserPrompt(acc,S,labelOf(S.overall)));
+        const out=await requestReportCommentary({...request,apiKey:getApiKey("gemini")});
         if(!active())return;
-        const {news:nw,...fin}=out;
-        // Unverified entry/stop/target values must never reach the report.
-        const {entry,stop,target,...commentary}=fin;
-        acc.final=commentary;acc.news=mergeNews(acc,nw);
-        writeAnalysisSection(sym,"ai",{fingerprint,final:acc.final,news:acc.news});
+        applyCommentary(out);
+        writeAnalysisSection(sym,"ai",{version:COMMENTARY_VERSION,fingerprint,report:out});
         clearNotice("ai");publish();
       }catch(e){
         if(!active())return;
@@ -715,12 +686,12 @@ export default function AnalizzatoreAzionario() {
         {f && (
           <>
             <Card title="Analisi fondamentale" meta={<Meta d={f.asOf} src={f.source} extra={f.isLatest === false} />}>
-              <p className={`text-xs mb-2 ${th.mute}`}>Ultimo bilancio pubblicato: {f.lastReportDate || "n.d."} · importi in milioni ({q?.currency || ""})</p>
+              <p className={`text-xs mb-2 ${th.mute}`}>Chiusura ultimo esercizio: {f.lastReportDate || "n.d."} · importi in milioni ({q?.currency || ""})</p>
               <div className="grid md:grid-cols-2 gap-4">
-                <SafeChart height={chartH}><ResponsiveContainer><BarChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="y" {...ax} /><YAxis {...ax} width={42} tickFormatter={cf} /><Tooltip {...tip} formatter={(x) => cf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFmt} /><Bar dataKey="rev" name="Ricavi" fill={C.blue} /><Bar dataKey="ebitda" name="EBITDA" fill={C.purple} /><Bar dataKey="ni" name="Utile netto" fill={C.green} /></BarChart></ResponsiveContainer></SafeChart>
-                <SafeChart height={chartH}><ResponsiveContainer><LineChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="y" {...ax} /><YAxis {...ax} width={36} unit="%" /><Tooltip {...tip} formatter={(x) => nf(x, 1) + "%"} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFmt} /><Line dataKey="gm" name="Margine lordo" stroke={C.blue} /><Line dataKey="om" name="Operativo" stroke={C.amber} /><Line dataKey="nm" name="Netto" stroke={C.green} /></LineChart></ResponsiveContainer></SafeChart>
-                <SafeChart height={chartH}><ResponsiveContainer><BarChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="y" {...ax} /><YAxis {...ax} width={42} tickFormatter={cf} /><Tooltip {...tip} formatter={(x) => cf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFmt} /><Bar dataKey="fcf" name="Free cash flow" fill={C.teal} /><Bar dataKey="eps" name="EPS" fill={C.amber} /></BarChart></ResponsiveContainer></SafeChart>
-                <SafeChart height={chartH}><ResponsiveContainer><BarChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="y" {...ax} /><YAxis {...ax} width={36} unit="%" /><Tooltip {...tip} formatter={(x) => pf(x)} /><Bar dataKey="g" name="Crescita ricavi a/a">{annual.map((r, i) => <Cell key={i} fill={r.g >= 0 ? C.green : C.red} />)}</Bar></BarChart></ResponsiveContainer></SafeChart>
+                <SafeChart height={chartH}><ResponsiveContainer><BarChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="periodLabel" {...ax} /><YAxis {...ax} width={42} tickFormatter={cf} /><Tooltip {...tip} formatter={(x) => cf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFmt} /><Bar dataKey="rev" name="Ricavi" fill={C.blue} /><Bar dataKey="ebitda" name="EBITDA" fill={C.purple} /><Bar dataKey="ni" name="Utile netto" fill={C.green} /></BarChart></ResponsiveContainer></SafeChart>
+                <SafeChart height={chartH}><ResponsiveContainer><LineChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="periodLabel" {...ax} /><YAxis {...ax} width={36} unit="%" /><Tooltip {...tip} formatter={(x) => nf(x, 1) + "%"} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFmt} /><Line dataKey="gm" name="Margine lordo" stroke={C.blue} /><Line dataKey="om" name="Operativo" stroke={C.amber} /><Line dataKey="nm" name="Netto" stroke={C.green} /></LineChart></ResponsiveContainer></SafeChart>
+                <SafeChart height={chartH}><ResponsiveContainer><BarChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="periodLabel" {...ax} /><YAxis {...ax} width={42} tickFormatter={cf} /><Tooltip {...tip} formatter={(x) => cf(x)} /><Legend wrapperStyle={{ fontSize: 11 }} formatter={legendFmt} /><Bar dataKey="fcf" name="Free cash flow" fill={C.teal} /><Bar dataKey="eps" name="EPS" fill={C.amber} /></BarChart></ResponsiveContainer></SafeChart>
+                <SafeChart height={chartH}><ResponsiveContainer><BarChart data={annual}><CartesianGrid stroke={th.grid} strokeDasharray="3 3" /><XAxis dataKey="periodLabel" {...ax} /><YAxis {...ax} width={36} unit="%" /><Tooltip {...tip} formatter={(x) => pf(x)} /><Bar dataKey="g" name="Crescita ricavi a/a">{annual.map((r, i) => <Cell key={i} fill={r.g >= 0 ? C.green : C.red} />)}</Bar></BarChart></ResponsiveContainer></SafeChart>
               </div>
               {(f.quarters || []).length > 0 && (
                 <div className="overflow-x-auto mt-3"><table className="w-full text-xs"><thead><tr className={th.mute}><th className="text-left p-1">Trimestre</th><th className="text-right p-1">Ricavi</th><th className="text-right p-1">Utile netto</th><th className="text-right p-1">EPS</th></tr></thead><tbody>{f.quarters.map((r, i) => <tr key={i} className={`border-t ${th.card}`}><td className="p-1">{r.p}</td><td className="text-right p-1">{cf(r.rev)}</td><td className={`text-right p-1 ${cfColor(r.ni)}`}>{cf(r.ni)}</td><td className={`text-right p-1 ${cfColor(r.eps)}`}>{nf(r.eps)}</td></tr>)}</tbody></table></div>
@@ -729,7 +700,7 @@ export default function AnalizzatoreAzionario() {
             <Card title="Solidità patrimoniale" meta={<Meta d={f.asOf} src={f.source} extra={f.isLatest === false} />}>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
                 <Stat k="Debito netto / EBITDA" v={S?.derived.nde != null ? nf(S.derived.nde) + "x" : "n.d."} c={lvl(S?.derived.nde, 2, 4, true)} />
-                <Stat k="Debt / Equity" v={bal.equity ? nf(bal.totalDebt / bal.equity) : "n.d."} c={bal.equity ? lvl(bal.totalDebt / bal.equity, 0.8, 2, true) : ""} />
+                <Stat k="Debt / Equity" v={num(bal.totalDebt) != null && num(bal.equity) > 0 ? nf(bal.totalDebt / bal.equity) : "n.d."} c={num(bal.totalDebt) != null && num(bal.equity) > 0 ? lvl(bal.totalDebt / bal.equity, 0.8, 2, true) : ""} />
                 <Stat k="Current ratio" v={nf(bal.currentRatio)} c={lvl(bal.currentRatio, 1, 1.5)} />
                 <Stat k="Copertura interessi" v={bal.interestCover != null ? nf(bal.interestCover) + "x" : "n.d."} c={lvl(bal.interestCover, 2, 5)} />
                 <Stat k="ROE" v={bal.roe != null ? nf(bal.roe) + "%" : "n.d."} c={lvl(bal.roe, 8, 15)} />

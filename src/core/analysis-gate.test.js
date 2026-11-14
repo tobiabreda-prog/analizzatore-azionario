@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessAnalysisReadiness, validIsoDate } from "./analysis-gate.js";
+import { assessAnalysisReadiness, comparableValuationMetrics, validIsoDate } from "./analysis-gate.js";
 
 const now = new Date("2026-11-13T12:00:00Z");
 function history(count=60) {
@@ -85,4 +85,47 @@ describe("sector-specific investment score gate",()=>{
  it("does not block a technology sector solely because it is not financial",()=>{
   expect(assessAnalysisReadiness({...fixture(),now,sector:"Technology",industry:"Software - Infrastructure"}).ready).toBe(true);
  });
+});
+
+describe("valuation eligibility shared with scoring", () => {
+  const valid = { k: "P/E", v: 20, sector: 20, date: "2026-11-12" };
+
+  it("counts only fresh supported metrics with a usable comparison", () => {
+    const input = fixture();
+    input.val.metrics = [
+      valid,
+      { ...valid, k: "P/S", date: "2020-01-01" },
+      { ...valid, k: "unsupported" },
+      null,
+      { ...valid, v: Infinity },
+      { ...valid, sector: Infinity },
+      { ...valid, date: "2026-02-30" },
+      { ...valid, date: "2026-11-20" }
+    ];
+    expect(comparableValuationMetrics(input.val.metrics, now)).toEqual([valid]);
+    const result = assessAnalysisReadiness({ ...input, now });
+    expect(result.ready).toBe(true);
+    expect(result.coverage.comparableMultiples).toBe(1);
+  });
+
+  it.each([
+    { ...valid, date: "2020-01-01" },
+    { ...valid, date: "2026-11-20" },
+    { ...valid, date: null },
+    { ...valid, k: "unsupported" },
+    { ...valid, sector: 0, hist5y: null },
+    { ...valid, v: -1 }
+  ])("blocks valuation when its only observation is unusable: %j", metric => {
+    const input = fixture();
+    input.val.metrics = [metric];
+    const result = assessAnalysisReadiness({ ...input, now });
+    expect(result.ready).toBe(false);
+    expect(result.coverage.comparableMultiples).toBe(0);
+  });
+
+  it("accepts a historical reference when the sector reference is unavailable", () => {
+    const metric = { ...valid, sector: null, hist5y: 20 };
+    expect(comparableValuationMetrics([metric], now)).toEqual([metric]);
+    expect(comparableValuationMetrics(null, now)).toEqual([]);
+  });
 });
