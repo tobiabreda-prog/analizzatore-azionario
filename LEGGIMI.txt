@@ -18,3 +18,8 @@ STRUTTURA: src/App.jsx (interfaccia e punteggi), src/data.js (Yahoo Finance e no
 src/core/ (gate e periodi fiscali), src/ai/report-commentary.js (validazione commenti AI),
 src/services/ (Gemini e cache), src/providers/ (adapter), src/modules/ (calcoli), tests/e2e/.
 CORREZIONI AFFIDABILITA': docs/RELIABILITY-FIXES.md.
+
+PORTAFOGLIO INVESTING.COM: apri Portafoglio, seleziona il CSV completo, verifica l'anteprima e conferma l'importazione.
+Riepilogo, lotti aperti, posizioni chiuse e tutte le colonne originali restano salvati localmente sul dispositivo.
+La reimportazione sostituisce la fotografia precedente senza duplicare i lotti; EUR e USD rimangono separati.
+ISTRUZIONI E LIMITI: docs/IMPORTAZIONE-PORTAFOGLIO.md.

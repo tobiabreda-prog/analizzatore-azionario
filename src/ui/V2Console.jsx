@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Plus, Trash2, Download, Upload, AlertTriangle } from "lucide-react";
+import { isInvestingCsv } from "../modules/investing-csv.js";
+import { readCsvFile } from "../services/csv-file.js";
 
 const KEY = "aa2_fair_value_watchlist_v1";
 const cleanSymbol = (value) => String(value ?? "").trim().toUpperCase();
@@ -7,7 +9,7 @@ const validSymbol = (symbol) => /^[A-Z0-9][A-Z0-9.^:_-]{0,29}$/.test(symbol);
 const csvEscape = (value) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
 const decodeCsv = (text) => {
  const lines = String(text).replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean);
- if (lines[0]?.trim() !== '"symbol"') throw new Error("Formato non riconosciuto: usa un CSV esportato dalla watchlist.");
+ if (lines[0]?.trim() !== '"symbol"') throw new Error("Formato non riconosciuto: scegli un backup della watchlist oppure un export portafoglio Investing.com.");
  const symbols = lines.slice(1).map((line) => {
   if (!/^"(?:[^"]|"")*"$/.test(line)) throw new Error("Riga CSV non valida.");
   return cleanSymbol(line.slice(1,-1).replace(/""/g,'"'));
@@ -22,12 +24,13 @@ const download = (name, text) => {
  setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
 
-export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},analysisData=null,onSelectSymbol=()=>{}}){
+export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},analysisData=null,onSelectSymbol=()=>{},onImportPortfolio=()=>{}}){
  const [symbols,setSymbols] = useState([]);
  const [input,setInput] = useState("");
  const [loaded,setLoaded] = useState(false);
  const [error,setError] = useState("");
  const [notice,setNotice] = useState("");
+ const [importing,setImporting] = useState(false);
  const current = cleanSymbol(analysisData?.quote?.ticker || analysisData?.quote?.symbol);
  const muted = dark?"text-slate-400":"text-slate-500";
  const card = dark?"bg-slate-900 border-slate-700":"bg-white border-slate-200";
@@ -70,13 +73,15 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
  const exportCsv=()=>download("watchlist.csv",["symbol",...symbols.map(csvEscape)].map((line,i)=>i===0?'"symbol"':line).join("\r\n")+"\r\n");
  const importCsv=async(e)=>{
   const file=e.target.files?.[0];if(!file)return;
-  setError("");setNotice("");
+  setError("");setNotice("");setImporting(true);
   try{
-   const incoming=decodeCsv(await file.text());
+   const source=await readCsvFile(file);
+   if(isInvestingCsv(source)){onImportPortfolio(file);return;}
+   const incoming=decodeCsv(source);
    if(symbols.length&&!window.confirm("Sostituire la watchlist attuale con "+incoming.length+" titoli del CSV?"))return;
    persist(incoming);setNotice("Watchlist ripristinata: "+incoming.length+" titoli.");
   }catch(err){setError("Ripristino CSV non riuscito: "+err.message);}
-  finally{e.target.value="";}
+  finally{setImporting(false);e.target.value="";}
  };
  return <div className={`workspace-shell min-h-screen ${dark?"bg-slate-950 text-slate-100 theme-dark":"bg-slate-50 text-slate-900 theme-light"}`}>
   <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-5">
@@ -90,9 +95,9 @@ export default function V2Console({dark=false,onBack=()=>{},onSettings=()=>{},an
     <div><h2 className="text-lg font-semibold">Watchlist essenziale</h2><p className={`text-xs ${muted}`}>Tocca un ticker per aprire direttamente il report del titolo. Qui puoi aggiungere, rimuovere, esportare e ripristinare i tuoi simboli.</p></div>
     {current&&!symbols.includes(current)&&<button type="button" onClick={saveCurrent} className="rounded-lg border px-3 py-2 text-xs">Aggiungi {current} alla watchlist</button>}
     <form onSubmit={add} className="flex flex-wrap gap-2"><input aria-label="Ticker" value={input} onChange={e=>setInput(e.target.value)} placeholder="es. AAPL o ENI.MI" className="min-w-0 flex-1 rounded-lg border bg-transparent p-2 text-sm" required/><button type="submit" className="rounded-lg bg-emerald-600 text-white px-4 py-2 flex items-center gap-2 text-sm"><Plus size={16}/>Aggiungi</button></form>
-    <div className="flex flex-wrap gap-2"><button type="button" onClick={exportCsv} className="rounded-lg border px-3 py-2 text-sm flex gap-2 items-center"><Download size={15}/>Esporta CSV</button><label className="rounded-lg border px-3 py-2 text-sm flex gap-2 items-center cursor-pointer"><Upload size={15}/>Ripristina CSV<input type="file" accept=".csv,text/csv" className="hidden" onChange={importCsv}/></label></div>
+    <div className="flex flex-wrap gap-2"><button type="button" onClick={exportCsv} className="rounded-lg border px-3 py-2 text-sm flex gap-2 items-center"><Download size={15}/>Esporta CSV</button><label className="rounded-lg border px-3 py-2 text-sm flex gap-2 items-center cursor-pointer"><Upload size={15}/>{importing?"Lettura CSV…":"Ripristina CSV"}<input aria-label="Ripristina CSV" type="file" accept=".csv,text/csv" className="sr-only" disabled={importing} onChange={importCsv}/></label></div>
     {!loaded?<p className={muted}>Caricamento watchlist…</p>:symbols.length===0?<p className={muted}>Nessun titolo salvato.</p>:<ul className="divide-y divide-slate-500/20">{symbols.map(symbol=><li key={symbol} className="flex items-center justify-between py-3 gap-2"><button type="button" onClick={()=>onSelectSymbol(symbol)} aria-label={"Analizza "+symbol} className="font-semibold text-left flex-1 min-w-0 rounded-lg px-2 py-2 hover:bg-emerald-500/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500"><span className="underline decoration-emerald-500/50">{symbol}</span><span className={`block text-xs font-normal ${muted}`}>Apri report</span></button><button type="button" onClick={()=>remove(symbol)} aria-label={"Rimuovi "+symbol} className="text-red-500 flex gap-1 items-center text-sm"><Trash2 size={16}/>Rimuovi</button></li>)}</ul>}
-    <p className={`text-xs ${muted}`}>Il backup CSV contiene soltanto i ticker della watchlist. I dati della watchlist già salvati nelle versioni precedenti vengono mantenuti.</p>
+    <p className={`text-xs ${muted}`}>Esporta CSV salva i ticker della watchlist. Ripristina CSV accetta sia questo backup sia il CSV completo di Investing.com: per quest’ultimo si apre l’anteprima del portafoglio con quantità, prezzi e lotti. La watchlist viene mantenuta.</p>
    </section>
   </div>
  </div>;
